@@ -1,0 +1,174 @@
+// SentinelApply - Autonomous AI Job Application SaaS
+// Prisma Schema for Authentication, Security, and Onboarding State (Steps A1 & A2)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+enum OnboardingStep {
+  A1_AUTH
+  A2_RESUME
+  A3_MASTER_PROFILE
+  A4_CHANNELS
+  A5_DASHBOARD_READY
+}
+
+enum AgentMode {
+  COPILOT
+  AUTOPILOT
+}
+
+enum ResumeParseStatus {
+  STAGED
+  PARSING
+  EXTRACTED
+  FAILED
+}
+
+enum VaultProvider {
+  GMAIL
+  LINKEDIN
+  GREENHOUSE
+  WORKDAY
+  WHATSAPP
+}
+
+enum SecurityEventType {
+  SIGNUP
+  LOGIN_GOOGLE
+  OTP_SENT
+  OTP_VERIFIED
+  OTP_FAILED
+  GUEST_RESUME_STAGED
+  GUEST_RESUME_CLAIMED
+  KILL_SWITCH_TOGGLED
+}
+
+model User {
+  id                  String             @id @default(uuid())
+  clerkId             String?            @unique
+  email               String?            @unique
+  phone               String?            @unique
+  phoneVerified       Boolean            @default(false)
+  emailVerified       Boolean            @default(false)
+  fullName            String?
+  onboardingStep      OnboardingStep     @default(A1_AUTH)
+  agentMode           AgentMode          @default(COPILOT)
+  autoApplyThreshold  Int                @default(80)
+  dailyApplicationCap Int                @default(5)
+  killSwitchActive    Boolean            @default(false)
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+  lastLoginAt         DateTime?
+
+  // Relations
+  guestResumes        GuestResumeSession[]
+  resumes             Resume[]
+  refreshTokens       RefreshTokenSession[]
+  vaultItems          EncryptedVaultItem[]
+  auditLogs           SecurityAuditLog[]
+
+  @@map("users")
+}
+
+model GuestResumeSession {
+  id                     String            @id @default(uuid())
+  guestTokenHash         String            @unique
+  fileName               String
+  fileMimeType           String
+  fileSize               Int
+  fileSha256Hash         String
+  storagePath            String
+  parseStatus            ResumeParseStatus @default(STAGED)
+  extractedSkillPreview  String?           // JSON string of preview skills & match estimation
+  claimedByUserId        String?
+  claimedByUser          User?             @relation(fields: [claimedByUserId], references: [id], onDelete: SetNull)
+  expiresAt              DateTime
+  ipAddress              String?
+  createdAt              DateTime          @default(now())
+
+  @@index([claimedByUserId])
+  @@index([expiresAt])
+  @@map("guest_resume_sessions")
+}
+
+model Resume {
+  id               String   @id @default(uuid())
+  userId           String
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fileName         String
+  fileSha256Hash   String
+  storagePath      String
+  parsedSkillGraph String?  // JSON string of full parsed skill graph
+  isPrimary        Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([userId])
+  @@map("resumes")
+}
+
+model OtpVerification {
+  id        String   @id @default(uuid())
+  phone     String
+  otpHash   String   // HMAC-SHA256, never plain text
+  attempts  Int      @default(0) // max 5
+  expiresAt DateTime // 5 mins
+  verified  Boolean  @default(false)
+  ipAddress String?
+  createdAt DateTime @default(now())
+
+  @@index([phone])
+  @@map("otp_verifications")
+}
+
+model RefreshTokenSession {
+  id         String   @id @default(uuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash  String   @unique
+  deviceInfo String?
+  ipAddress  String?
+  isRevoked  Boolean  @default(false)
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+
+  @@index([userId])
+  @@map("refresh_token_sessions")
+}
+
+model EncryptedVaultItem {
+  id               String        @id @default(uuid())
+  userId           String
+  user             User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider         VaultProvider
+  encryptedPayload String
+  iv               String
+  authTag          String
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  @@unique([userId, provider])
+  @@index([userId])
+  @@map("encrypted_vault_items")
+}
+
+model SecurityAuditLog {
+  id        String            @id @default(uuid())
+  userId    String?
+  user      User?             @relation(fields: [userId], references: [id], onDelete: SetNull)
+  eventType SecurityEventType
+  ipAddress String?
+  userAgent String?
+  metadata  String?           // JSON string of context metadata
+  createdAt DateTime          @default(now())
+
+  @@index([userId])
+  @@index([eventType])
+  @@map("security_audit_logs")
+}

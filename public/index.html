@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>User Data & Resume Portal — Connected to Supabase</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'sans-serif'],
+            mono: ['JetBrains Mono', 'monospace'],
+          },
+          colors: {
+            brand: {
+              50: '#ecfeff',
+              400: '#22d3ee',
+              500: '#06b6d4',
+              600: '#0891b2',
+            },
+            surface: {
+              900: '#090d16',
+              800: '#0f172a',
+              700: '#1e293b',
+              600: '#334155',
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body class="bg-surface-900 text-slate-100 min-h-screen flex flex-col font-sans selection:bg-brand-500 selection:text-white">
+
+  <!-- Header -->
+  <header class="border-b border-surface-700/80 bg-surface-900/80 backdrop-blur-md sticky top-0 z-40">
+    <div class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+      
+      <!-- Logo -->
+      <div class="flex items-center space-x-3">
+        <div class="w-9 h-9 rounded-xl bg-gradient-to-tr from-cyan-500 to-emerald-500 flex items-center justify-center shadow-lg shadow-cyan-500/20 text-lg text-white">
+          ⚡
+        </div>
+        <div>
+          <span class="font-bold text-lg tracking-tight bg-gradient-to-r from-white via-slate-200 to-cyan-400 bg-clip-text text-transparent">Data & Resume Portal</span>
+        </div>
+      </div>
+
+      <!-- Supabase Connection Badge -->
+      <div class="flex items-center space-x-3">
+        <div id="supabase-status-pill" class="flex items-center space-x-2 px-3 py-1 rounded-full text-xs font-mono bg-emerald-950/80 text-emerald-400 border border-emerald-800">
+          <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+          <span id="supabase-status-text">Supabase Connected</span>
+        </div>
+        <button onclick="openSqlModal()" class="px-3 py-1 rounded-lg text-xs font-mono bg-surface-800 hover:bg-surface-700 text-cyan-300 border border-surface-700 transition">
+          SQL Setup
+        </button>
+      </div>
+
+    </div>
+  </header>
+
+  <!-- Main Content -->
+  <main class="flex-1 max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-10 w-full space-y-10">
+
+    <!-- Top Headline -->
+    <div class="text-center space-y-2">
+      <div class="inline-flex items-center space-x-2 px-3 py-1 rounded-full bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 text-xs font-medium">
+        <span>🟢 Connected to Supabase</span>
+        <span>•</span>
+        <span class="font-mono">poeexdmvvqfwviatgedj.supabase.co</span>
+      </div>
+      <h1 class="text-3xl sm:text-4xl font-extrabold tracking-tight">User Data & Resume Submission</h1>
+      <p class="text-slate-400 text-sm max-w-xl mx-auto">
+        Fill out your profile details and upload your resume. All information is securely stored in your Supabase backend.
+      </p>
+    </div>
+
+    <!-- Main Submission Form Card -->
+    <div class="bg-surface-800/60 border border-surface-700/80 backdrop-blur-md rounded-3xl p-6 sm:p-10 shadow-2xl space-y-8">
+      
+      <form id="submission-form" onsubmit="handleFormSubmit(event)" class="space-y-6">
+        
+        <!-- Row 1: Name & Email -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-5">
+          <div class="space-y-1.5">
+            <label class="block text-xs font-semibold text-slate-300">Full Name <span class="text-rose-400">*</span></label>
+            <input type="text" id="input-name" required placeholder="e.g. Aryan Raj" class="w-full px-4 py-2.5 rounded-xl bg-surface-900 border border-surface-700 text-slate-100 text-sm focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400 outline-none transition" />
+          </div>
+
+          <div class="space-y-1.5">
+            <label class="block text-xs font-semibold text-slate-300">Email Address <span class="text-rose-400">*</span></label>
+            <input type="email" id="input-email" required placeholder="aryan@example.com" class="w-full px-4 py-2.5 rounded-xl bg-surface-900 border border-surface-700 text-slate-100 text-sm focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400 outline-none transition" />
+          </div>
+        </div>
+
+        <!-- Row 2: Phone & Target Role -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-5">
+          <div class="space-y-1.5">
+            <label class="block text-xs font-semibold text-slate-300">Phone Number</label>
+            <input type="tel" id="input-phone" placeholder="+91 9876543210" class="w-full px-4 py-2.5 rounded-xl bg-surface-900 border border-surface-700 text-slate-100 text-sm font-mono focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400 outline-none transition" />
+          </div>
+
+          <div class="space-y-1.5">
+            <label class="block text-xs font-semibold text-slate-300">Target Role / Designation</label>
+            <input type="text" id="input-role" placeholder="e.g. Full Stack Developer / AI Engineer" class="w-full px-4 py-2.5 rounded-xl bg-surface-900 border border-surface-700 text-slate-100 text-sm focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400 outline-none transition" />
+          </div>
+        </div>
+
+        <!-- Row 3: Skills -->
+        <div class="space-y-1.5">
+          <label class="block text-xs font-semibold text-slate-300">Key Skills (comma separated)</label>
+          <input type="text" id="input-skills" placeholder="TypeScript, React, Node.js, Python, SQL" class="w-full px-4 py-2.5 rounded-xl bg-surface-900 border border-surface-700 text-slate-100 text-sm focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400 outline-none transition" />
+        </div>
+
+        <!-- Row 4: Resume File Upload -->
+        <div class="space-y-2">
+          <label class="block text-xs font-semibold text-slate-300">Resume Document (PDF or DOCX, Max 10MB)</label>
+          
+          <div id="resume-dropzone" class="border-2 border-dashed border-surface-600 hover:border-cyan-400 bg-surface-900/60 rounded-2xl p-6 text-center cursor-pointer transition group">
+            <input type="file" id="input-resume" class="hidden" accept=".pdf,.docx" onchange="handleFileChange(this)" />
+            
+            <div id="dropzone-prompt" class="space-y-2">
+              <div class="text-3xl text-cyan-400">📄</div>
+              <div>
+                <span class="text-sm font-medium text-slate-200 group-hover:text-cyan-300 transition">Click or drag & drop to upload resume</span>
+                <p class="text-xs text-slate-500 mt-0.5">Supports PDF and Word documents</p>
+              </div>
+            </div>
+
+            <!-- Selected File Badge -->
+            <div id="selected-file-info" class="hidden flex items-center justify-center space-x-2 py-2">
+              <span class="text-xl text-emerald-400">✔</span>
+              <span id="selected-filename" class="font-bold text-sm text-cyan-300">resume.pdf</span>
+              <span id="selected-filesize" class="text-xs text-slate-400 font-mono"></span>
+              <button type="button" onclick="clearSelectedFile(event)" class="text-xs text-rose-400 hover:text-rose-300 pl-2">Remove</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Row 5: Notes -->
+        <div class="space-y-1.5">
+          <label class="block text-xs font-semibold text-slate-300">Additional Notes / Bio (Optional)</label>
+          <textarea id="input-notes" rows="2" placeholder="Tell us about yourself, current CTC, notice period, or links to GitHub/portfolio..." class="w-full px-4 py-2 rounded-xl bg-surface-900 border border-surface-700 text-slate-100 text-sm focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400 outline-none transition"></textarea>
+        </div>
+
+        <!-- Submit Button -->
+        <div class="pt-2">
+          <button type="submit" id="btn-submit" class="w-full py-3.5 rounded-2xl bg-gradient-to-r from-cyan-500 via-sky-500 to-emerald-500 hover:from-cyan-400 hover:to-emerald-400 text-white font-bold text-sm shadow-xl shadow-cyan-500/20 transition flex items-center justify-center space-x-2">
+            <span>Save My Data & Resume to Supabase</span>
+            <span>➔</span>
+          </button>
+        </div>
+
+      </form>
+
+    </div>
+
+    <!-- Live Submissions Stream Card -->
+    <div class="bg-surface-800/40 border border-surface-700/60 rounded-3xl p-6 sm:p-8 shadow-xl space-y-4">
+      <div class="flex items-center justify-between border-b border-surface-700/60 pb-3">
+        <div>
+          <h3 class="font-bold text-lg text-slate-200">Recent Submissions in Supabase</h3>
+          <p class="text-xs text-slate-400">All submissions saved from this portal</p>
+        </div>
+        <button onclick="loadSubmissions()" class="px-3 py-1.5 rounded-xl bg-surface-700 hover:bg-surface-600 text-xs text-slate-200 font-medium transition">
+          Refresh List
+        </button>
+      </div>
+
+      <div id="submissions-list" class="space-y-3">
+        <p class="text-xs text-slate-500 text-center py-6">Loading submissions...</p>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- =================================================================== -->
+  <!-- SQL SETUP MODAL (For Supabase Dashboard Table Creation)             -->
+  <!-- =================================================================== -->
+  <div id="sql-modal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm hidden flex items-center justify-center p-4">
+    <div class="bg-surface-800 border border-surface-700 rounded-3xl max-w-2xl w-full p-6 sm:p-8 shadow-2xl relative space-y-5">
+      <button onclick="closeSqlModal()" class="absolute top-5 right-5 text-slate-400 hover:text-white text-xl">✕</button>
+
+      <div>
+        <h3 class="text-xl font-bold text-slate-100 flex items-center space-x-2">
+          <span>⚡</span>
+          <span>Supabase SQL Setup (1-Click Table Creation)</span>
+        </h3>
+        <p class="text-xs text-slate-400 mt-1">
+          Open your Supabase Dashboard ➔ <strong>SQL Editor</strong> ➔ paste this SQL script and click <strong>Run</strong>. This will automatically create the <code class="text-cyan-300">user_data</code> table and allow public submissions.
+        </p>
+      </div>
+
+      <div class="relative">
+        <pre class="bg-surface-900 border border-surface-700 p-4 rounded-2xl text-xs font-mono text-cyan-300 overflow-x-auto max-h-72"><code id="sql-code">-- 1. Create User Data Table
+create table if not exists public.user_data (
+  id uuid default gen_random_uuid() primary key,
+  full_name text not null,
+  email text not null,
+  phone text,
+  target_role text,
+  skills text,
+  notes text,
+  resume_file_name text,
+  resume_url text,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+-- 2. Enable Row Level Security and Allow Public Inserts
+alter table public.user_data enable row level security;
+
+create policy "Allow public inserts" on public.user_data 
+  for insert with check (true);
+
+create policy "Allow public selects" on public.user_data 
+  for select using (true);
+
+-- 3. Create Storage Bucket for Resumes
+insert into storage.buckets (id, name, public) 
+values ('resumes', 'resumes', true)
+on conflict (id) do nothing;
+
+create policy "Public Access to Resumes" on storage.objects 
+  for select using (bucket_id = 'resumes');
+
+create policy "Public Upload to Resumes" on storage.objects 
+  for insert with check (bucket_id = 'resumes');</code></pre>
+
+        <button onclick="copySql()" id="btn-copy-sql" class="absolute top-3 right-3 px-3 py-1.5 rounded-xl bg-surface-800 hover:bg-surface-700 text-xs font-mono text-slate-200 border border-surface-600 transition">
+          Copy SQL
+        </button>
+      </div>
+
+      <div class="flex justify-end">
+        <button onclick="closeSqlModal()" class="px-5 py-2 rounded-xl bg-surface-700 hover:bg-surface-600 text-slate-200 text-xs font-semibold">
+          Done
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notification Container -->
+  <div id="toast-container" class="fixed bottom-6 right-6 z-50 space-y-2 pointer-events-none"></div>
+
+  <!-- Scripts -->
+  <script src="app.js"></script>
+</body>
+</html>

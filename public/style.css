@@ -1,0 +1,70 @@
+/* Custom CSS for SentinelApply UI */
+
+/* Active tab styles */
+.nav-btn {
+  color: #94a3b8;
+}
+.nav-btn:hover {
+  color: #e2e8f0;
+  background-color: rgba(30, 41, 59, 0.6);
+}
+.nav-btn.active {
+  color: #22d3ee;
+  background-color: rgba(6, 182, 212, 0.1);
+  border: 1px solid rgba(6, 182, 212, 0.25);
+}
+
+/* Dropzone dragover effect */
+.dropzone.dragover {
+  border-color: #22d3ee !important;
+  background-color: rgba(6, 182, 212, 0.08) !important;
+  transform: scale(1.01);
+}
+
+/* Stepper step states */
+.step-bar.completed {
+  background-color: #10b981 !important; /* emerald */
+  box-shadow: 0 0 10px rgba(16, 185, 129, 0.4);
+}
+.step-bar.active {
+  background-color: #06b6d4 !important; /* cyan */
+  box-shadow: 0 0 10px rgba(6, 182, 212, 0.5);
+  animation: pulse-glow 2s infinite;
+}
+
+@keyframes pulse-glow {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+/* Custom scrollbars */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: #090d16;
+}
+::-webkit-scrollbar-thumb {
+  background: #1e293b;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #334155;
+}
+
+/* Toast animations */
+.toast {
+  animation: slideInRight 0.25s ease-out forwards;
+}
+
+@keyframes slideInRight {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}

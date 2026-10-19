@@ -1,0 +1,51 @@
+# dependencies
+/node_modules
+/.pnp
+.pnp.js
+.yarn/install-state.gz
+
+# testing
+/coverage
+
+# next.js
+/.next/
+/out/
+
+# production
+/build
+/dist
+
+# misc
+.DS_Store
+*.pem
+Thumbs.db
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# local env files (do NOT commit secrets)
+.env
+.env*.local
+!.env.example
+
+# databases
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+
+# vercel
+.vercel
+
+# typescript
+*.tsbuildinfo
+
+# uploads / local resumes
+/uploads/*
+!/uploads/.gitkeep
+
+# IDE configs
+.vscode/
+.idea/
