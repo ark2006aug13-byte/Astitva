@@ -46,7 +46,8 @@ export interface JobToMatch {
  */
 export async function evaluateJobMatch(
   job: JobToMatch,
-  candidate: CandidateContext
+  candidate: CandidateContext,
+  options: { fast?: boolean } = {}
 ): Promise<MatchResult> {
   const candidateSummary = `Candidate: ${candidate.fullName}
 Target Roles: ${candidate.targetRoles.join(', ')}
@@ -57,8 +58,8 @@ Summary: ${candidate.summary}`;
   const cosineSim = await computeJobCosineScore(candidateSummary, job.jd_text);
   const baseCosineScore = Math.round(cosineSim * 100);
 
-  // 2. LLM Evaluation pass
-  const evaluation = await runLlmMatchingPass(job, candidate, baseCosineScore);
+  // 2. LLM Evaluation pass (fast deterministic pass if requested)
+  const evaluation = await runLlmMatchingPass(job, candidate, baseCosineScore, options);
 
   // 3. HARD RULE: matched_skills may ONLY contain skills present in candidate resume_skills
   const candidateSkillLookup = new Map<string, string>();
@@ -128,13 +129,19 @@ Summary: ${candidate.summary}`;
 async function runLlmMatchingPass(
   job: JobToMatch,
   candidate: CandidateContext,
-  baseCosineScore: number
+  baseCosineScore: number,
+  options: { fast?: boolean } = {}
 ): Promise<{
   score: number;
   matched_skills: string[];
   missing_skills: string[];
   reasons: string[];
 }> {
+  // If fast matching requested (e.g. bulk pool matching), jump directly to deterministic semantic rules
+  if (options.fast) {
+    return evaluateDeterministicPass(job, candidate, baseCosineScore);
+  }
+
   const prompt = `You are the MatchAgent for CareerPilot AI.
 Candidate Skills: ${JSON.stringify(candidate.resumeSkills)}
 Candidate Target Roles: ${JSON.stringify(candidate.targetRoles)}
@@ -152,22 +159,26 @@ Return STRICT JSON only (no markdown, no backticks, no extra text):
   "reasons": [<2 to 3 short sentences explaining score>]
 }`;
 
-  // 1. Anthropic Claude
+  // 1. Anthropic Claude (with 1200ms timeout race for snappy matching SLA)
   if (process.env.ANTHROPIC_API_KEY) {
     try {
       const { Anthropic } = await import('@anthropic-ai/sdk');
       const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-      const response = await client.messages.create({
+      const claudePromise = client.messages.create({
         model: 'claude-3-5-sonnet-20241022',
         max_tokens: 800,
         messages: [{ role: 'user', content: prompt }],
       });
+      const timeoutPromise = new Promise<null>((r) => setTimeout(() => r(null), 1200));
+      const response: any = await Promise.race([claudePromise, timeoutPromise]);
 
-      const textBlock = response.content.find((c: any) => c.type === 'text') as any;
-      if (textBlock && textBlock.text) {
-        const jsonMatch = textBlock.text.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-          return JSON.parse(jsonMatch[0]);
+      if (response && response.content) {
+        const textBlock = response.content.find((c: any) => c.type === 'text') as any;
+        if (textBlock && textBlock.text) {
+          const jsonMatch = textBlock.text.match(/\{[\s\S]*\}/);
+          if (jsonMatch) {
+            return JSON.parse(jsonMatch[0]);
+          }
         }
       }
     } catch (anthropicErr) {
@@ -175,18 +186,20 @@ Return STRICT JSON only (no markdown, no backticks, no extra text):
     }
   }
 
-  // 2. OpenAI GPT-4o
+  // 2. OpenAI GPT-4o (with 1200ms timeout race for snappy matching SLA)
   if (process.env.OPENAI_API_KEY) {
     try {
       const { OpenAI } = await import('openai');
       const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-      const completion = await client.chat.completions.create({
+      const gptPromise = client.chat.completions.create({
         model: 'gpt-4o',
         messages: [{ role: 'user', content: prompt }],
         response_format: { type: 'json_object' },
       });
+      const timeoutPromise = new Promise<null>((r) => setTimeout(() => r(null), 1200));
+      const completion: any = await Promise.race([gptPromise, timeoutPromise]);
 
-      const content = completion.choices[0]?.message?.content;
+      const content = completion?.choices?.[0]?.message?.content;
       if (content) {
         return JSON.parse(content);
       }
@@ -195,7 +208,23 @@ Return STRICT JSON only (no markdown, no backticks, no extra text):
     }
   }
 
-  // 3. Deterministic Semantic Rule Evaluator
+  // 3. Fallback to Deterministic Semantic Rule Evaluator
+  return evaluateDeterministicPass(job, candidate, baseCosineScore);
+}
+
+/**
+ * Fast deterministic semantic matching pass using skill token matching and cosine base
+ */
+function evaluateDeterministicPass(
+  job: JobToMatch,
+  candidate: CandidateContext,
+  baseCosineScore: number
+): {
+  score: number;
+  matched_skills: string[];
+  missing_skills: string[];
+  reasons: string[];
+} {
   const jdLower = job.jd_text.toLowerCase();
   const matched: string[] = [];
   const candidateSkills = candidate.resumeSkills || [];
