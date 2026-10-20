@@ -26,8 +26,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className={`${inter.variable} ${spaceGrotesk.variable}`}>
-      <body className="font-sans bg-[#F7F8FB] text-[#475569] antialiased min-h-screen selection:bg-cyan-500/20 selection:text-cyan-900">
+    <html lang="en" suppressHydrationWarning className={`${inter.variable} ${spaceGrotesk.variable}`}>
+      <body suppressHydrationWarning className="font-sans bg-[#F7F8FB] text-[#475569] antialiased min-h-screen selection:bg-cyan-500/20 selection:text-cyan-900">
         {children}
       </body>
     </html>

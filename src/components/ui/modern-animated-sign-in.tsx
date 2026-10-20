@@ -60,8 +60,7 @@ const Input = memo(
         onMouseLeave={() => setVisible(false)}
         className='group/input rounded-xl p-[1px] transition duration-300'
       >
-        <input
-          type={type}
+        <input suppressHydrationWarning type={type}
           className={cn(
             `flex h-10 w-full rounded-xl border border-[#E2E8F0] bg-white px-3.5 py-2 text-sm text-[#0F172A] placeholder:text-[#94A3B8] shadow-sm transition duration-200 group-hover/input:shadow-none file:border-0 file:bg-transparent file:text-sm file:font-medium focus-visible:ring-2 focus-visible:ring-cyan-600/20 focus-visible:border-cyan-600 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50`,
             className
