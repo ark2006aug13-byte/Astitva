@@ -212,6 +212,10 @@ export const postApplyDb = {
   },
 
   // ===================== INTERVIEWS =====================
+  async saveInterview(record: Omit<InterviewRecord, 'id' | 'created_at'> & { id?: string }): Promise<InterviewRecord> {
+    return this.createInterview(record);
+  },
+
   async createInterview(record: Omit<InterviewRecord, 'id' | 'created_at'> & { id?: string }): Promise<InterviewRecord> {
     if (!record.company || !record.company.trim()) {
       throw new Error('Interview row cannot exist without company');

@@ -67,6 +67,7 @@ export interface ApplicationEventRecord {
   id: string;
   application_id: string;
   event: string;
+  event_type?: string;
   meta: Record<string, any>;
   ts: string;
 }
@@ -467,6 +468,16 @@ export const submissionDb = {
     return null;
   },
 
+  async updateApprovalRequest(idOrAppId: string, updates: { decision: 'approved' | 'rejected'; rejection_reason?: string }): Promise<ApprovalRequestRecord | null> {
+    const req = store.approvalRequests.get(idOrAppId);
+    const appId = req ? req.application_id : idOrAppId;
+    return this.updateApprovalDecision(appId, updates.decision, { rejection_reason: updates.rejection_reason });
+  },
+
+  async listApplicationEvents(applicationId: string): Promise<ApplicationEventRecord[]> {
+    return this.getApplicationEvents(applicationId);
+  },
+
   async updateApprovalDecision(
     applicationId: string,
     decision: 'approved' | 'rejected',
@@ -562,6 +573,7 @@ export const submissionDb = {
       id,
       application_id: applicationId,
       event,
+      event_type: event,
       meta,
       ts,
     };

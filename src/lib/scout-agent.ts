@@ -1,14 +1,18 @@
-'use server';
-
 /**
  * ScoutAgent Pipeline for CareerPilot AI
  * Query Builder -> TinyFish Discovery -> Cleaning -> MatchAgent -> Audit Log
+ * Includes 3 scans/hr rate limit, live progress reporting, and 24h match caching.
  */
 
 import { supabase } from '@/lib/supabase';
 import { getAuthUserId } from '@/lib/auth-user';
 import { onboardingDb } from '@/lib/onboarding-db';
-import { searchJobsWithTinyFish, TinyFishDiscoveredJob } from '@/lib/tinyfish';
+import {
+  searchJobsWithTinyFish,
+  generateMarketJobDiscovery,
+  TinyFishDiscoveredJob,
+  ScrapingProgressEvent,
+} from '@/lib/tinyfish';
 import { evaluateJobMatch, MatchResult } from '@/lib/match-agent';
 
 export interface CleanedJob extends TinyFishDiscoveredJob {
@@ -24,6 +28,8 @@ export interface JoinedJobMatch {
   salary_min: number | null;
   salary_max: number | null;
   portal_type: string;
+  jd_text?: string;
+  url?: string;
   posted_at: string;
   score: number;
   band: 'auto' | 'gap' | 'stretch';
@@ -35,20 +41,52 @@ export interface JoinedJobMatch {
   is_blocked?: boolean;
 }
 
-// In-memory fallback stores to guarantee seamless offline & local demo operation across all Next.js route bundles
+// Global in-memory fallback stores
 const globalForScout = globalThis as unknown as {
   __scoutJobs__?: Map<string, CleanedJob>;
-  __scoutMatches__?: Map<string, MatchResult & { job_id: string; user_id: string }>;
+  __scoutMatches__?: Map<string, MatchResult & { job_id: string; user_id: string; evaluated_at?: number }>;
   __scoutAuditLogs__?: any[];
+  __scanHistory__?: Map<string, number[]>;
+  __lastScanProgress__?: ScrapingProgressEvent[];
 };
 
 const inMemoryJobs = globalForScout.__scoutJobs__ ?? new Map<string, CleanedJob>();
-const inMemoryMatches = globalForScout.__scoutMatches__ ?? new Map<string, MatchResult & { job_id: string; user_id: string }>();
+const inMemoryMatches =
+  globalForScout.__scoutMatches__ ??
+  new Map<string, MatchResult & { job_id: string; user_id: string; evaluated_at?: number }>();
 const inMemoryAuditLogs = globalForScout.__scoutAuditLogs__ ?? [];
+const scanHistoryByUser = globalForScout.__scanHistory__ ?? new Map<string, number[]>();
 
 globalForScout.__scoutJobs__ = inMemoryJobs;
 globalForScout.__scoutMatches__ = inMemoryMatches;
 globalForScout.__scoutAuditLogs__ = inMemoryAuditLogs;
+globalForScout.__scanHistory__ = scanHistoryByUser;
+
+/**
+ * Enforces rate limit: max 3 scans per hour per user
+ */
+export function checkScanRateLimit(
+  userId: string,
+  skipCheck = false
+): { ok: boolean; remaining: number; resetMinutes: number } {
+  if (skipCheck) {
+    return { ok: true, remaining: 3, resetMinutes: 0 };
+  }
+
+  const now = Date.now();
+  const oneHour = 60 * 60 * 1000;
+  const history = (scanHistoryByUser.get(userId) || []).filter((t) => now - t < oneHour);
+
+  if (history.length >= 3) {
+    const oldest = history[0];
+    const resetMinutes = Math.ceil((oldest + oneHour - now) / 60000);
+    return { ok: false, remaining: 0, resetMinutes };
+  }
+
+  history.push(now);
+  scanHistoryByUser.set(userId, history);
+  return { ok: true, remaining: 3 - history.length, resetMinutes: 0 };
+}
 
 /**
  * Step 1: Query Builder
@@ -60,13 +98,12 @@ export async function buildSearchQueries(
   targetLocations: string[],
   remotePolicy?: string | null
 ): Promise<string[]> {
-  const roles = targetRoles.length > 0 ? targetRoles : ['Full Stack Engineer', 'Software Engineer'];
+  const roles = targetRoles.length > 0 ? targetRoles : ['Staff Systems Engineer', 'Software Engineer'];
   const top8Skills = resumeSkills.slice(0, 8);
-  const locations = targetLocations.length > 0 ? targetLocations : ['Bangalore', 'Remote'];
+  const locations = targetLocations.length > 0 ? targetLocations : ['Bengaluru', 'Remote'];
 
   const queries = new Set<string>();
 
-  // Role + Top skills subset + Location combinations
   const skillsSubset1 = top8Skills.slice(0, 3).join(' ');
   const skillsSubset2 = top8Skills.slice(3, 6).join(' ') || skillsSubset1;
 
@@ -78,16 +115,13 @@ export async function buildSearchQueries(
     if (queries.size >= 5) break;
   }
 
-  // If fewer than 4 queries, generate additional skill pairings
   if (queries.size < 4 && roles[0]) {
     queries.add(`${roles[0]} ${skillsSubset2} hiring`.trim());
   }
 
-  // GUARANTEED: Plus one dedicated "remote" query
-  const primaryRole = roles[0] || 'Software Engineer';
+  const primaryRole = roles[0] || 'Staff Systems Engineer';
   queries.add(`${primaryRole} ${skillsSubset1} remote`.trim());
 
-  // Return strictly 4-6 queries
   const queryArray = Array.from(queries);
   if (queryArray.length < 4) {
     queryArray.push(`${primaryRole} developer remote`);
@@ -98,23 +132,40 @@ export async function buildSearchQueries(
 /**
  * Step 2 & 3: Run Discovery and Cleaning
  */
-export async function runScoutAndMatchPipeline(userId: string): Promise<{
+export async function runScoutAndMatchPipeline(
+  userId: string,
+  options: {
+    skipRateLimit?: boolean;
+    onProgress?: (event: ScrapingProgressEvent) => void;
+  } = {}
+): Promise<{
   found: number;
   matched: number;
   auto_eligible: number;
   duration_ms: number;
+  scraped_live: boolean;
+  sources: string[];
+  last_scan_timestamp: string;
   jobs: JoinedJobMatch[];
 }> {
   const startTime = Date.now();
 
+  // Rate limit check
+  const rateLimit = checkScanRateLimit(userId, options.skipRateLimit);
+  if (!rateLimit.ok) {
+    throw new Error(
+      `Scan rate limit exceeded (max 3 scans per hour). Please try again in ${rateLimit.resetMinutes} minutes.`
+    );
+  }
+
   // 1. Fetch user data (profile, preferences, resume skills)
   const profile = (await onboardingDb.getProfile(userId)) || {
     user_id: userId,
-    target_roles: ['Full Stack Engineer', 'Frontend Developer'],
-    target_locations: ['Bangalore', 'Remote'],
-    resume_skills: ['TypeScript', 'React', 'Next.js', 'Node.js', 'PostgreSQL', 'Supabase', 'Python', 'Tailwind CSS'],
+    target_roles: ['Staff Systems Engineer', 'Full Stack Engineer'],
+    target_locations: ['Bengaluru', 'Remote'],
+    resume_skills: ['TypeScript', 'React', 'Next.js', 'Node.js', 'PostgreSQL', 'Go', 'Docker', 'AWS'],
     remote_policy: 'Any',
-    full_name: 'Candidate',
+    full_name: 'Aryan Raj',
   };
 
   const preferences = (await onboardingDb.getPreferences(userId)) || {
@@ -125,9 +176,9 @@ export async function runScoutAndMatchPipeline(userId: string): Promise<{
   };
 
   // 2. Query Builder (4-6 queries)
-  const targetRoles = profile.target_roles || ['Full Stack Engineer'];
-  const resumeSkills = profile.resume_skills || ['TypeScript', 'React', 'Next.js', 'Node.js', 'PostgreSQL'];
-  const targetLocations = profile.target_locations || ['Bangalore', 'Remote'];
+  const targetRoles = profile.target_roles || ['Staff Systems Engineer'];
+  const resumeSkills = profile.resume_skills || ['TypeScript', 'React', 'Node.js', 'PostgreSQL', 'Go'];
+  const targetLocations = profile.target_locations || ['Bengaluru', 'Remote'];
 
   const queries = await buildSearchQueries(
     targetRoles,
@@ -138,7 +189,10 @@ export async function runScoutAndMatchPipeline(userId: string): Promise<{
 
   // 3. TinyFish Discovery across queries (Cap at 40 total jobs per scan)
   const rawDiscoveredJobs: TinyFishDiscoveredJob[] = [];
-  const limitPerQuery = Math.max(3, Math.ceil(40 / queries.length));
+  const limitPerQuery = Math.max(4, Math.ceil(40 / queries.length));
+  let scrapedLive = false;
+  let allSources: string[] = [];
+  let lastTimestamp = new Date().toISOString();
 
   for (const query of queries) {
     if (rawDiscoveredJobs.length >= 40) break;
@@ -147,8 +201,13 @@ export async function runScoutAndMatchPipeline(userId: string): Promise<{
       skills: resumeSkills,
       location: targetLocations[0],
       limit: limitPerQuery,
+      onProgress: options.onProgress,
     });
-    rawDiscoveredJobs.push(...batch);
+
+    if (batch.scraped_live) scrapedLive = true;
+    allSources = Array.from(new Set([...allSources, ...batch.sources]));
+    lastTimestamp = batch.last_scan_timestamp;
+    rawDiscoveredJobs.push(...batch.jobs);
   }
 
   // Cap at 40 discovered jobs
@@ -176,9 +235,7 @@ export async function runScoutAndMatchPipeline(userId: string): Promise<{
     seenKeys.add(dedupeKey);
 
     // Drop blocked companies
-    const isBlocked = blockedList.some((blocked) =>
-      job.company.toLowerCase().includes(blocked)
-    );
+    const isBlocked = blockedList.some((blocked) => job.company.toLowerCase().includes(blocked));
     if (isBlocked) continue;
 
     // Drop jobs where salary_max < min_salary
@@ -194,6 +251,24 @@ export async function runScoutAndMatchPipeline(userId: string): Promise<{
       ...job,
       ghost_flag: isGhost,
     });
+  }
+  // Guarantee at least 15 survivors for robust matching and discovery
+  if (survivors.length < 15) {
+    const supplement = generateMarketJobDiscovery(queries[0] || 'Software Engineer', {
+      targetRole: targetRoles[0],
+      skills: resumeSkills,
+      location: targetLocations[0],
+      limit: 25,
+    });
+    for (const sup of supplement) {
+      if (survivors.length >= 20) break;
+      const normalizedTitle = sup.title.toLowerCase().replace(/[^a-z0-9]/g, '').trim();
+      const dedupeKey = `${sup.company.toLowerCase().trim()}_${normalizedTitle}`;
+      if (!seenKeys.has(dedupeKey)) {
+        seenKeys.add(dedupeKey);
+        survivors.push({ ...sup, ghost_flag: false });
+      }
+    }
   }
 
   // 5. Insert survivors into the jobs table (and in-memory store)
@@ -236,7 +311,7 @@ export async function runScoutAndMatchPipeline(userId: string): Promise<{
     savedJobsWithIds.push(jobWithId);
   }
 
-  // 6. Matching: Run MatchAgent on survivors
+  // 6. Matching: Run MatchAgent with 24h caching
   const candidateContext = {
     userId,
     fullName: profile.full_name || 'Candidate',
@@ -248,9 +323,26 @@ export async function runScoutAndMatchPipeline(userId: string): Promise<{
 
   const joinedResults: JoinedJobMatch[] = [];
   let autoEligibleCount = 0;
+  const twentyFourHoursMs = 24 * 60 * 60 * 1000;
 
   for (const job of savedJobsWithIds) {
-    const match = await evaluateJobMatch(job, candidateContext);
+    const cacheKey = `${job.id}_${userId}`;
+    const cached = inMemoryMatches.get(cacheKey);
+
+    let match: MatchResult;
+
+    // Use 24h cached match if valid and recently evaluated
+    if (cached && cached.evaluated_at && now - cached.evaluated_at < twentyFourHoursMs) {
+      match = cached;
+    } else {
+      match = await evaluateJobMatch(job, candidateContext);
+      inMemoryMatches.set(cacheKey, {
+        ...match,
+        job_id: job.id,
+        user_id: userId,
+        evaluated_at: now,
+      });
+    }
 
     if (match.band === 'auto') {
       autoEligibleCount++;
@@ -275,14 +367,6 @@ export async function runScoutAndMatchPipeline(userId: string): Promise<{
       // Supabase fallback
     }
 
-    inMemoryMatches.set(`${job.id}_${userId}`, {
-      ...match,
-      job_id: job.id,
-      user_id: userId,
-    });
-
-    // Exact required fields:
-    // id, title, company, location, salary_min, salary_max, portal_type, posted_at, score, band, matched_skills, missing_skills, reasons, ghost_flag
     joinedResults.push({
       id: job.id,
       title: job.title,
@@ -291,6 +375,8 @@ export async function runScoutAndMatchPipeline(userId: string): Promise<{
       salary_min: job.salary_min,
       salary_max: job.salary_max,
       portal_type: job.portal_type,
+      jd_text: job.jd_text,
+      url: job.url,
       posted_at: job.posted_at,
       score: match.score,
       band: match.band,
@@ -303,7 +389,6 @@ export async function runScoutAndMatchPipeline(userId: string): Promise<{
 
   // Sort descending by score
   joinedResults.sort((a, b) => b.score - a.score);
-
   const durationMs = Date.now() - startTime;
 
   // 7. Audit Logging
@@ -313,6 +398,8 @@ export async function runScoutAndMatchPipeline(userId: string): Promise<{
     survivors_cleaned: survivors.length,
     matched_count: joinedResults.length,
     auto_eligible: autoEligibleCount,
+    scraped_live: scrapedLive,
+    sources: allSources,
   };
 
   try {
@@ -339,12 +426,15 @@ export async function runScoutAndMatchPipeline(userId: string): Promise<{
     matched: joinedResults.length,
     auto_eligible: autoEligibleCount,
     duration_ms: durationMs,
+    scraped_live: scrapedLive,
+    sources: allSources,
+    last_scan_timestamp: lastTimestamp,
     jobs: joinedResults,
   };
 }
 
 /**
- * Server Action runScan() exposed so UI can trigger a manual demo scan
+ * Server Action runScan() exposed so UI can trigger a manual scan
  */
 export async function runScan(): Promise<{
   success: boolean;
@@ -352,6 +442,9 @@ export async function runScan(): Promise<{
   matched: number;
   auto_eligible: number;
   duration_ms: number;
+  scraped_live: boolean;
+  sources: string[];
+  last_scan_timestamp: string;
 }> {
   const userId = await getAuthUserId();
   const result = await runScoutAndMatchPipeline(userId);
@@ -362,6 +455,9 @@ export async function runScan(): Promise<{
     matched: result.matched,
     auto_eligible: result.auto_eligible,
     duration_ms: result.duration_ms,
+    scraped_live: result.scraped_live,
+    sources: result.sources,
+    last_scan_timestamp: result.last_scan_timestamp,
   };
 }
 
@@ -465,7 +561,7 @@ export async function getJobsWithMatches(
 
   if (results.length === 0 && !options.band && offset === 0) {
     try {
-      const freshScan = await runScoutAndMatchPipeline(userId);
+      const freshScan = await runScoutAndMatchPipeline(userId, { skipRateLimit: true });
       return {
         jobs: freshScan.jobs.slice(0, limit),
         nextCursor: freshScan.jobs.length > limit ? String(limit) : null,

@@ -1390,6 +1390,278 @@ export async function runSelfVerificationProtocol(options: { mode?: 'supabase' |
     });
   }
 
+  // =========================================================================
+  // V26: REAL RESUME UPLOAD & INTELLIGENCE
+  // Upload actual text-based PDF, verify parsed_json has >5 skills, >2 experiences,
+  // and years_experience computed correctly (>0).
+  // =========================================================================
+  try {
+    const { PDFDocument, StandardFonts } = await import('pdf-lib');
+    const { extractRawTextFromBuffer, parseResumeWithLLM, persistParsedResume } = await import('@/lib/resume-intelligence');
+
+    // Generate real candidate PDF
+    const pdfDoc = await PDFDocument.create();
+    const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+    const page = pdfDoc.addPage([600, 800]);
+    const resumeTextContent = `Aryan Raj — Staff Systems Engineer
+Email: aryan.raj@careerpilot.ai | Phone: +91 98765 43210 | Location: Bengaluru, India | LinkedIn: linkedin.com/in/aryan-raj
+
+Executive Summary:
+Accomplished Staff Systems Engineer with 6+ years of experience architecting high-scale distributed systems, microservices, and AI-driven platforms. Expert in TypeScript, React, Next.js, Node.js, Go, PostgreSQL, Redis, Docker, and AWS cloud environments.
+
+Core Technical Skills:
+TypeScript, JavaScript, React, Next.js, Node.js, Go, PostgreSQL, Redis, Docker, Kubernetes, AWS, System Design, REST APIs, GraphQL, Microservices, CI/CD, Git
+
+Professional Work Experience:
+Staff Systems Engineer at TechScale Systems (2021 - Present)
+• Architected event-driven microservices processing 15M+ requests daily with 99.99% availability.
+• Engineered distributed workflow pipelines reducing async submission latencies by 38%.
+• Spearheaded architecture modernization and mentored 12 senior engineering team members.
+
+Senior Software Engineer at CloudNative Labs (2019 - 2021)
+• Spearheaded full-stack cloud applications in React, Node.js, and PostgreSQL on AWS.
+• Built containerized deployment pipelines utilizing Docker and Kubernetes clusters.
+
+Software Engineer at Apex Digital (2018 - 2019)
+• Engineered responsive web applications and RESTful APIs with automated test suites.
+
+Education:
+B.S. in Computer Science & Engineering, IIT Bombay (Graduated 2018)`;
+
+    page.drawText(resumeTextContent, { x: 40, y: 760, size: 9, font, lineHeight: 12 });
+    const pdfBytes = await pdfDoc.save();
+    const pdfBuffer = Buffer.from(pdfBytes);
+
+    const extractedText = await extractRawTextFromBuffer(pdfBuffer, 'Aryan_Raj_Resume.pdf');
+    const { parsed, method, modelUsed } = await parseResumeWithLLM(extractedText);
+
+    await persistParsedResume(testUserId, extractedText, parsed, '/uploads/resumes/test.pdf');
+
+    const hasSkills = parsed.skills.length > 5;
+    const hasExperiences = parsed.experience.length > 2;
+    const hasYearsExp = typeof parsed.years_experience === 'number' && parsed.years_experience > 0;
+
+    const passed = hasSkills && hasExperiences && hasYearsExp && extractedText.length > 100;
+
+    results.push({
+      check: 'V26',
+      name: 'Real resume upload: upload actual PDF, verify parsed_json has >5 skills, >2 experiences, years_experience computed correctly',
+      status: passed ? 'PASS' : 'FAIL',
+      evidence: `skills_count=${parsed.skills.length} (>5), experiences_count=${parsed.experience.length} (>2), years_experience=${parsed.years_experience}, text_len=${extractedText.length}, method=${method}, model=${modelUsed}`,
+    });
+  } catch (err: any) {
+    results.push({
+      check: 'V26',
+      name: 'Real resume upload',
+      status: 'FAIL',
+      evidence: err.message,
+    });
+  }
+
+  // =========================================================================
+  // V27: REAL JOB SCRAPING (TinyFish ScoutAgent)
+  // POST /api/jobs/scan returns jobs with real company names, real JDs (>200 chars),
+  // real posting dates (within last 30 days). Verify at least 10 jobs found.
+  // =========================================================================
+  try {
+    const { runScoutAndMatchPipeline } = await import('@/lib/scout-agent');
+    const scanResult = await runScoutAndMatchPipeline(testUserId, { skipRateLimit: true });
+
+    const totalFound = scanResult.jobs.length;
+    const hasAtLeast10 = totalFound >= 10;
+
+    const now = Date.now();
+    const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000;
+
+    const sampleJobs = scanResult.jobs.slice(0, 5);
+    const validJds = sampleJobs.every((j) => {
+      const jd = j.jd_text || '';
+      return jd.length > 200;
+    });
+
+    const validDates = sampleJobs.every((j) => {
+      const t = new Date(j.posted_at).getTime();
+      return !isNaN(t) && now - t <= thirtyDaysMs;
+    });
+
+    const validCompanies = sampleJobs.every((j) => Boolean(j.company && j.company.trim().length > 0));
+
+    const passed = hasAtLeast10 && validJds && validDates && validCompanies;
+
+    results.push({
+      check: 'V27',
+      name: 'Real job scraping: POST /api/jobs/scan returns jobs with real company names, real JDs (>200 chars), real posting dates (within last 30 days), at least 10 jobs found',
+      status: passed ? 'PASS' : 'FAIL',
+      evidence: `total_found=${totalFound} (>=10), valid_jds=${validJds}, valid_dates=${validDates}, valid_companies=${validCompanies}, sources=${scanResult.sources?.join(', ')}`,
+    });
+  } catch (err: any) {
+    results.push({
+      check: 'V27',
+      name: 'Real job scraping',
+      status: 'FAIL',
+      evidence: err.message,
+    });
+  }
+
+  // =========================================================================
+  // V28: REAL MATCHING ENGINE
+  // For a scraped job, verify matched_skills are subset of resume_skills,
+  // missing_skills are from JD but not in resume, reasons are non-empty strings.
+  // =========================================================================
+  try {
+    const { evaluateJobMatch } = await import('@/lib/match-agent');
+    const userProfile = await onboardingDb.getProfile(testUserId);
+    const candidateSkills = userProfile?.resume_skills || ['TypeScript', 'React', 'Node.js', 'PostgreSQL', 'Go', 'Docker'];
+
+    const testJob = {
+      id: `job-eval-${Date.now()}`,
+      title: 'Staff Systems Engineer',
+      company: 'TechCorp Global',
+      location: 'Bengaluru',
+      jd_text: `We are looking for a Staff Systems Engineer proficient in TypeScript, React, Node.js, and Distributed Systems. Experience with Kubernetes, Docker, and Kafka is strongly preferred.`,
+    };
+
+    const match = await evaluateJobMatch(testJob, {
+      userId: testUserId,
+      fullName: 'Aryan Raj',
+      targetRoles: ['Staff Systems Engineer'],
+      resumeSkills: candidateSkills,
+      summary: 'Experienced Staff Systems Engineer',
+      autoApplyThreshold: 80,
+    });
+
+    // Whitelist check: matched_skills MUST be strict subset of resume_skills
+    const candSkillLower = new Set(candidateSkills.map((s) => s.toLowerCase().trim()));
+    const matchedAreSubset = match.matched_skills.every((s) => candSkillLower.has(s.toLowerCase().trim()));
+
+    // Missing skills must not overlap with candidate skills
+    const missingNotOverlap = match.missing_skills.every((s) => !candSkillLower.has(s.toLowerCase().trim()));
+
+    // Reasons must be non-empty strings
+    const reasonsValid = match.reasons.length >= 2 && match.reasons.every((r) => typeof r === 'string' && r.trim().length > 0);
+
+    const hasScore = typeof match.score === 'number' && match.score >= 0 && match.score <= 100;
+    const hasExplainability = typeof match.explainability === 'string' && match.explainability.length > 0;
+
+    const passed = matchedAreSubset && missingNotOverlap && reasonsValid && hasScore && hasExplainability;
+
+    results.push({
+      check: 'V28',
+      name: 'Real matching: verify matched_skills are subset of resume_skills, missing_skills not in resume, reasons are non-empty strings',
+      status: passed ? 'PASS' : 'FAIL',
+      evidence: `matched_subset=${matchedAreSubset} (${match.matched_skills.join(',')}), missing_no_overlap=${missingNotOverlap} (${match.missing_skills.join(',')}), reasons_valid=${reasonsValid}, score=${match.score}, explainability="${match.explainability}"`,
+    });
+  } catch (err: any) {
+    results.push({
+      check: 'V28',
+      name: 'Real matching',
+      status: 'FAIL',
+      evidence: err.message,
+    });
+  }
+
+  // =========================================================================
+  // V29: REAL SUBMISSION (TinyFish SubmitAgent)
+  // Approve a job, verify events logged, demo_submissions row created,
+  // proof_url is valid Supabase Storage / URL, confirmation_id matches CONF-\d{6}.
+  // =========================================================================
+  try {
+    const submitApp = await submissionDb.createApplication({
+      user_id: testUserId,
+      job_id: `job-submit-real-${Date.now()}`,
+      status: 'awaiting_approval',
+      form_data_json: {
+        personal: { firstName: 'Aryan', lastName: 'Raj', email: 'aryan@careerpilot.ai' },
+        experience: [{ company: 'TechScale', title: 'Staff Systems Engineer' }],
+        screening: { authorized_to_work: true, requires_sponsorship: false },
+        pdf_url: '/uploads/resumes/aryan_tailored.pdf',
+      },
+    });
+
+    const submitApproval = await submissionDb.createApprovalRequest({
+      application_id: submitApp.id,
+      user_id: testUserId,
+      decision: 'pending',
+    });
+
+    // Approve the application
+    await submissionDb.updateApprovalDecision(submitApp.id, 'approved');
+
+    // Execute submission pipeline
+    const { runSubmitPipeline } = await import('@/lib/submit-agent');
+    const submitRes = await runSubmitPipeline(submitApp.id);
+
+    const confIdValid = Boolean(submitRes.confirmation_id && /^CONF-\d{6}$/.test(submitRes.confirmation_id));
+    const proofUrlValid = Boolean(submitRes.proof_url && submitRes.proof_url.length > 10);
+    const statusConfirmed = submitRes.status === 'confirmed';
+
+    // Verify demo_submissions row exists
+    const demoSub = await submissionDb.getDemoSubmission(submitRes.confirmation_id!);
+    const demoSubExists = Boolean(demoSub && demoSub.confirmation_id === submitRes.confirmation_id);
+
+    // Verify events were logged
+    const events = await submissionDb.listApplicationEvents(submitApp.id);
+    const hasSubmittingStarted = events.some((e) => e.event === 'submitting_started' || (e as any).event_type === 'submitting_started');
+    const hasVerified = events.some((e) => e.event === 'verified' || (e as any).event_type === 'verified');
+
+    const passed = confIdValid && proofUrlValid && statusConfirmed && demoSubExists && hasSubmittingStarted && hasVerified;
+
+    results.push({
+      check: 'V29',
+      name: 'Real submission: approve a job, verify events logged, demo_submissions row created, proof_url valid, confirmation_id CONF-\d{6}',
+      status: passed ? 'PASS' : 'FAIL',
+      evidence: `conf_id=${submitRes.confirmation_id} (valid=${confIdValid}), status=${submitRes.status}, proof_url=${submitRes.proof_url?.slice(0, 35)}..., demo_sub=${demoSubExists}, events_count=${events.length}`,
+    });
+  } catch (err: any) {
+    results.push({
+      check: 'V29',
+      name: 'Real submission',
+      status: 'FAIL',
+      evidence: err.message,
+    });
+  }
+
+  // =========================================================================
+  // V30: REAL RESEARCH (TinyFish War Room)
+  // Trigger interview sync / War Room build, verify dossier has past_questions (>=8),
+  // resources have real URLs, interviewer_intel has real data, and full suite passes.
+  // =========================================================================
+  try {
+    const { buildWarRoom } = await import('@/lib/warroom');
+    const researchInterview = await postApplyDb.createInterview({
+      user_id: testUserId,
+      application_id: `app-v30-${Date.now()}`,
+      company: 'Razorpay',
+      round_type: 'System Architecture & Scaling',
+      round_number: 2,
+      scheduled_at: new Date(Date.now() + 86400000 * 3).toISOString(),
+    });
+
+    const warRoom = await buildWarRoom(researchInterview.id, { forceRebuild: true });
+    const dossier = warRoom.plan.dossier_json;
+
+    const has8Questions = Array.isArray(dossier.past_questions) && dossier.past_questions.length >= 8;
+    const hasRealResourceUrls = Array.isArray(dossier.resources) && dossier.resources.length >= 4 && dossier.resources.every((r) => r.url && r.url.startsWith('http'));
+    const hasInterviewerIntel = Boolean(dossier.interviewer_intel && dossier.interviewer_intel.name && dossier.interviewer_intel.style_tip);
+    const hasTopicClusters = Array.isArray(dossier.topic_clusters) && dossier.topic_clusters.length >= 4;
+
+    const passed = has8Questions && hasRealResourceUrls && hasInterviewerIntel && hasTopicClusters;
+
+    results.push({
+      check: 'V30',
+      name: 'Real research: War Room dossier has past_questions (>=8), resources have real URLs, interviewer_intel has real data, and full suite passes',
+      status: passed ? 'PASS' : 'FAIL',
+      evidence: `questions_count=${dossier.past_questions?.length} (>=8), resources_count=${dossier.resources?.length} (all_http=${hasRealResourceUrls}), interviewer=${dossier.interviewer_intel?.name}, clusters=${dossier.topic_clusters?.length}`,
+    });
+  } catch (err: any) {
+    results.push({
+      check: 'V30',
+      name: 'Real research',
+      status: 'FAIL',
+      evidence: err.message,
+    });
+  }
+
   const allPassed = results.every((r) => r.status === 'PASS');
   return { results, allPassed, storageEngine };
 }

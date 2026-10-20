@@ -2,6 +2,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
 import { getAuthUserId } from '@/lib/auth-user';
 import { onboardingDb } from '@/lib/onboarding-db';
+import {
+  extractRawTextFromBuffer,
+  parseResumeWithLLM,
+  persistParsedResume,
+} from '@/lib/resume-intelligence';
 
 export async function POST(req: NextRequest) {
   try {
@@ -19,8 +24,22 @@ export async function POST(req: NextRequest) {
     const fileName = file.name;
     const fileBytes = await file.arrayBuffer();
     const buffer = Buffer.from(fileBytes);
-    const safePath = `resumes/${userId}_${Date.now()}_${fileName.replace(/[^a-zA-Z0-9.-]/g, '_')}`;
 
+    // Extract text from uploaded document (verifies text-based PDF/DOCX)
+    let extractedText = '';
+    try {
+      extractedText = await extractRawTextFromBuffer(buffer, fileName);
+    } catch (parseErr: any) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: parseErr.message || 'Upload text-based PDF/DOCX',
+        },
+        { status: 400 }
+      );
+    }
+
+    const safePath = `resumes/${userId}_${Date.now()}_${fileName.replace(/[^a-zA-Z0-9.-]/g, '_')}`;
     let resumeUrl = '';
 
     // Upload to Supabase Storage bucket 'resumes'
@@ -47,22 +66,40 @@ export async function POST(req: NextRequest) {
       resumeUrl = `/uploads/${safePath}`;
     }
 
+    // Parse with Real LLM (Anthropic / OpenAI) or deterministic rule engine
+    const { parsed, method, modelUsed } = await parseResumeWithLLM(extractedText);
+
+    // Persist parsed resume to database & update profile skills
+    await persistParsedResume(userId, extractedText, parsed, resumeUrl);
+
     // Save resume_url into profiles
     await onboardingDb.upsertProfile(userId, {
       resume_url: resumeUrl,
+      resume_skills: parsed.skills,
+      years_experience: parsed.years_experience,
     });
+
+    const confidenceBadge = `Parsed ${parsed.skills.length} skills, ${parsed.experience.length} experiences`;
 
     return NextResponse.json({
       success: true,
       resume_url: resumeUrl,
       file_name: fileName,
       size: file.size,
+      text_length: extractedText.length,
+      parsed_json: parsed,
+      confidence_badge: confidenceBadge,
+      method,
+      model_used: modelUsed,
     });
   } catch (error: unknown) {
     console.error('[POST /api/resume/upload] Error:', error);
+    const message = error instanceof Error ? error.message : 'Upload failed';
+    const isClientError = message.includes('Upload text-based PDF/DOCX');
+
     return NextResponse.json(
-      { success: false, error: error instanceof Error ? error.message : 'Upload failed' },
-      { status: 500 }
+      { success: false, error: message },
+      { status: isClientError ? 400 : 500 }
     );
   }
 }

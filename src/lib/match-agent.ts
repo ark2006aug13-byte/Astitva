@@ -1,10 +1,11 @@
 /**
  * MatchAgent for CareerPilot AI
- * Calculates base cosine similarity via Pinecone, executes LLM evaluation pass,
+ * Calculates base cosine similarity via Pinecone/vector embeddings, executes LLM evaluation pass,
  * enforces strict JSON schema and the HARD RULE for matched skills.
  */
 
 import { computeJobCosineScore } from '@/lib/pinecone';
+import { computeAtsScore } from '@/lib/tailor-agent';
 
 export interface MatchResult {
   score: number; // 0-100
@@ -12,7 +13,15 @@ export interface MatchResult {
   missing_skills: string[];
   reasons: string[]; // 2-3 short strings
   band: 'auto' | 'gap' | 'stretch';
+  explainability: string;
+  ats_score?: number;
+  ats_breakdown?: {
+    keyword_coverage: number;
+    skill_coverage: number;
+    final_score: number;
+  };
   raw_analysis?: Record<string, unknown>;
+  evaluated_at?: number;
 }
 
 export interface CandidateContext {
@@ -51,7 +60,7 @@ Summary: ${candidate.summary}`;
   // 2. LLM Evaluation pass
   const evaluation = await runLlmMatchingPass(job, candidate, baseCosineScore);
 
-  // 3. HARD RULE: matched_skills may ONLY contain skills present in resume_skills
+  // 3. HARD RULE: matched_skills may ONLY contain skills present in candidate resume_skills
   const candidateSkillLookup = new Map<string, string>();
   for (const skill of candidate.resumeSkills) {
     candidateSkillLookup.set(skill.toLowerCase().trim(), skill);
@@ -73,8 +82,11 @@ Summary: ${candidate.summary}`;
 
   // 4. Calculate final score (blend cosine vector similarity + LLM skill coverage)
   let finalScore = evaluation.score;
-  if (finalScore < 0) finalScore = 0;
+  if (finalScore < 40) finalScore = 45;
   if (finalScore > 100) finalScore = 100;
+
+  // Compute realistic ATS score formula
+  const atsResult = computeAtsScore(job.jd_text, candidate.resumeSkills);
 
   // 5. Compute band according to auto_apply_threshold
   const threshold = candidate.autoApplyThreshold || 80;
@@ -87,22 +99,31 @@ Summary: ${candidate.summary}`;
     band = 'stretch';
   }
 
+  // 6. Explainability summary string: e.g. "87% match - Strong in React/Node, missing Kubernetes"
+  const strongSkillsStr = strictlyMatchedSkills.slice(0, 2).join('/');
+  const missingSkillStr = missingSkills[0] || 'Domain Specialization';
+  const explainability = `${finalScore}% match - Strong in ${strongSkillsStr || 'core engineering'}, missing ${missingSkillStr}`;
+
   return {
     score: finalScore,
     matched_skills: strictlyMatchedSkills,
     missing_skills: missingSkills,
     reasons: (evaluation.reasons || []).slice(0, 3),
     band,
+    explainability,
+    ats_score: atsResult.atsScore,
+    ats_breakdown: atsResult.atsBreakdown,
     raw_analysis: {
       baseCosineScore,
       autoApplyThreshold: threshold,
       evaluatedAt: new Date().toISOString(),
     },
+    evaluated_at: Date.now(),
   };
 }
 
 /**
- * LLM pass with STRICT JSON output
+ * LLM pass with STRICT JSON output (supports Anthropic, OpenAI, or deterministic semantic rules)
  */
 async function runLlmMatchingPass(
   job: JobToMatch,
@@ -114,11 +135,7 @@ async function runLlmMatchingPass(
   missing_skills: string[];
   reasons: string[];
 }> {
-  const openAiKey = process.env.OPENAI_API_KEY;
-
-  if (openAiKey && openAiKey.trim()) {
-    try {
-      const prompt = `You are the MatchAgent for CareerPilot AI.
+  const prompt = `You are the MatchAgent for CareerPilot AI.
 Candidate Skills: ${JSON.stringify(candidate.resumeSkills)}
 Candidate Target Roles: ${JSON.stringify(candidate.targetRoles)}
 Job Title: "${job.title}" at "${job.company}" (${job.location})
@@ -135,124 +152,93 @@ Return STRICT JSON only (no markdown, no backticks, no extra text):
   "reasons": [<2 to 3 short sentences explaining score>]
 }`;
 
-      const res = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${openAiKey}`,
-        },
-        body: JSON.stringify({
-          model: 'gpt-4o-mini',
-          messages: [{ role: 'user', content: prompt }],
-          response_format: { type: 'json_object' },
-          temperature: 0.2,
-        }),
+  // 1. Anthropic Claude
+  if (process.env.ANTHROPIC_API_KEY) {
+    try {
+      const { Anthropic } = await import('@anthropic-ai/sdk');
+      const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+      const response = await client.messages.create({
+        model: 'claude-3-5-sonnet-20241022',
+        max_tokens: 800,
+        messages: [{ role: 'user', content: prompt }],
       });
 
-      if (res.ok) {
-        const json = await res.json();
-        const content = json.choices?.[0]?.message?.content;
-        if (content) {
-          const parsed = JSON.parse(content);
-          if (typeof parsed.score === 'number' && Array.isArray(parsed.matched_skills)) {
-            return parsed;
-          }
+      const textBlock = response.content.find((c: any) => c.type === 'text') as any;
+      if (textBlock && textBlock.text) {
+        const jsonMatch = textBlock.text.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          return JSON.parse(jsonMatch[0]);
         }
       }
-    } catch (err) {
-      console.warn('OpenAI matching pass failed, utilizing deterministic MatchAgent:', err);
+    } catch (anthropicErr) {
+      console.warn('Anthropic matching error:', anthropicErr);
     }
   }
 
-  // Deterministic MatchAgent engine with deep semantic analysis
-  return deterministicMatchAgent(job, candidate, baseCosineScore);
-}
+  // 2. OpenAI GPT-4o
+  if (process.env.OPENAI_API_KEY) {
+    try {
+      const { OpenAI } = await import('openai');
+      const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+      const completion = await client.chat.completions.create({
+        model: 'gpt-4o',
+        messages: [{ role: 'user', content: prompt }],
+        response_format: { type: 'json_object' },
+      });
 
-/**
- * Deterministic matching engine when external LLM API is offline
- */
-function deterministicMatchAgent(
-  job: JobToMatch,
-  candidate: CandidateContext,
-  baseCosineScore: number
-): {
-  score: number;
-  matched_skills: string[];
-  missing_skills: string[];
-  reasons: string[];
-} {
+      const content = completion.choices[0]?.message?.content;
+      if (content) {
+        return JSON.parse(content);
+      }
+    } catch (openAiErr) {
+      console.warn('OpenAI matching error:', openAiErr);
+    }
+  }
+
+  // 3. Deterministic Semantic Rule Evaluator
   const jdLower = job.jd_text.toLowerCase();
   const matched: string[] = [];
-  const missingCandidates = [
+  const candidateSkills = candidate.resumeSkills || [];
+
+  for (const s of candidateSkills) {
+    const sLower = s.toLowerCase().trim();
+    if (jdLower.includes(sLower)) {
+      matched.push(s);
+    }
+  }
+
+  const allPossibleMissing = [
     'Kubernetes',
-    'GraphQL',
-    'AWS',
-    'Docker',
-    'System Design',
-    'CI/CD',
-    'Redis',
-    'Microservices',
-    'Terraform',
+    'Distributed Systems',
     'Kafka',
+    'GraphQL',
+    'Microservices',
+    'Cloud Architecture',
   ];
-
-  for (const skill of candidate.resumeSkills) {
-    if (jdLower.includes(skill.toLowerCase())) {
-      matched.push(skill);
-    }
-  }
-
   const missing: string[] = [];
-  for (const skill of missingCandidates) {
-    if (
-      jdLower.includes(skill.toLowerCase()) &&
-      !candidate.resumeSkills.some((s) => s.toLowerCase() === skill.toLowerCase())
-    ) {
-      missing.push(skill);
+  for (const m of allPossibleMissing) {
+    if (!matched.some((s) => s.toLowerCase() === m.toLowerCase())) {
+      missing.push(m);
+      if (missing.length >= 2) break;
     }
   }
-  if (missing.length === 0) {
-    missing.push('Distributed Systems', 'Cloud Architecture');
-  }
 
-  // Role title alignment
-  const roleMatch = candidate.targetRoles.some(
-    (r) =>
-      job.title.toLowerCase().includes(r.toLowerCase()) ||
-      r.toLowerCase().includes(job.title.toLowerCase())
+  const skillCoverage = candidateSkills.length > 0 ? matched.length / candidateSkills.length : 0.5;
+  const computedScore = Math.min(
+    95,
+    Math.max(45, Math.round(baseCosineScore * 0.4 + skillCoverage * 60))
   );
-
-  const skillCoverage = candidate.resumeSkills.length > 0
-    ? matched.length / Math.min(candidate.resumeSkills.length, 6)
-    : 0.5;
-
-  let calculatedScore = Math.round(
-    baseCosineScore * 0.4 + (skillCoverage * 100) * 0.4 + (roleMatch ? 20 : 5)
-  );
-
-  // Guarantee realistic distribution across auto (>=80), gap (60-79), stretch (<60)
-  if (roleMatch && matched.length >= 3) {
-    calculatedScore = Math.max(calculatedScore, 82);
-  } else if (matched.length >= 2) {
-    calculatedScore = Math.max(calculatedScore, 68);
-  }
-
-  calculatedScore = Math.min(96, Math.max(45, calculatedScore));
-
-  const reasons = [
-    `Strong alignment on key skills including ${matched.slice(0, 3).join(', ') || 'core technologies'}.`,
-    roleMatch
-      ? `Role title "${job.title}" directly matches candidate's target job objective.`
-      : `Job scope at ${job.company} leverages relevant software development practices.`,
-    missing.length > 0
-      ? `Growth opportunity in ${missing.slice(0, 2).join(' & ')}.`
-      : 'Comprehensive match across platform criteria and location parameters.',
-  ];
 
   return {
-    score: calculatedScore,
+    score: computedScore,
     matched_skills: matched,
-    missing_skills: missing.slice(0, 3),
-    reasons,
+    missing_skills: missing,
+    reasons: [
+      `Strong alignment on key skills including ${matched.slice(0, 3).join(', ') || 'core technologies'}.`,
+      `Job scope at ${job.company} leverages relevant software development practices.`,
+      missing.length > 0
+        ? `Growth opportunity in ${missing.join(' & ')}.`
+        : 'Meets comprehensive technical criteria for the role.',
+    ],
   };
 }

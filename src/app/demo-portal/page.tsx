@@ -14,8 +14,10 @@ import {
   ShieldCheck,
   Briefcase,
   User,
+  GraduationCap,
   HelpCircle,
   FileText,
+  AlertCircle,
 } from 'lucide-react';
 
 interface ExperienceItem {
@@ -26,6 +28,13 @@ interface ExperienceItem {
   summary: string;
 }
 
+interface EducationItem {
+  school: string;
+  degree: string;
+  fieldOfStudy: string;
+  gradYear: string;
+}
+
 export default function DemoPortalPage() {
   const [step, setStep] = useState<number>(1);
   const [submitting, setSubmitting] = useState(false);
@@ -33,22 +42,41 @@ export default function DemoPortalPage() {
 
   // Form State
   const [personal, setPersonal] = useState({
-    firstName: 'Alex',
-    lastName: 'Rivera',
-    email: 'alex.rivera@example.com',
-    phone: '+1 (555) 234-5678',
-    city: 'San Francisco',
-    country: 'United States',
-    linkedin: 'https://linkedin.com/in/alexrivera',
+    firstName: 'Aryan',
+    lastName: 'Raj',
+    email: 'aryan@careerpilot.ai',
+    phone: '+91 98765 43210',
+    address: 'Indiranagar 100ft Road',
+    city: 'Bengaluru',
+    country: 'India',
+    linkedin: 'https://linkedin.com/in/aryan-raj',
   });
 
   const [experiences, setExperiences] = useState<ExperienceItem[]>([
     {
-      company: 'TechCorp Global',
-      title: 'Senior Software Engineer',
-      start: '2022-01',
+      company: 'TechScale Systems',
+      title: 'Staff Systems Engineer',
+      start: '2021-03',
       end: 'Present',
-      summary: 'Architected high-throughput web systems and distributed microservices with 99.99% uptime.',
+      summary:
+        'Architected high-throughput microservices processing 15M+ daily requests using TypeScript, Node.js, and PostgreSQL.',
+    },
+    {
+      company: 'CloudNative Labs',
+      title: 'Senior Software Engineer',
+      start: '2019-06',
+      end: '2021-02',
+      summary:
+        'Built scalable cloud applications with React and Docker on AWS, reducing p99 API latencies by 38%.',
+    },
+  ]);
+
+  const [education, setEducation] = useState<EducationItem[]>([
+    {
+      school: 'IIT Bombay',
+      degree: 'Bachelor of Technology',
+      fieldOfStudy: 'Computer Science & Engineering',
+      gradYear: '2019',
     },
   ]);
 
@@ -58,21 +86,18 @@ export default function DemoPortalPage() {
     travel: 'yes',
     relocate: 'yes',
     whyThisRole:
-      'Passionate about building scalable distributed systems and contributing to mission-critical infrastructure.',
+      'Excited about building high-scale distributed systems and contributing to mission-critical infrastructure.',
+    challengingProject:
+      'Designed a multi-region event pipeline handling 25,000 events/sec with zero packet loss.',
   });
 
-  const [resumeFileName, setResumeFileName] = useState('Alex_Rivera_Tailored_Resume.pdf');
+  const [resumeFileName, setResumeFileName] = useState('Aryan_Raj_Staff_Systems_Engineer.pdf');
+  const [clientError, setClientError] = useState<string | null>(null);
 
   const addExperience = () => {
     setExperiences([
       ...experiences,
-      {
-        company: '',
-        title: '',
-        start: '',
-        end: '',
-        summary: '',
-      },
+      { company: '', title: '', start: '', end: '', summary: '' },
     ]);
   };
 
@@ -87,12 +112,61 @@ export default function DemoPortalPage() {
     setExperiences(updated);
   };
 
+  const addEducation = () => {
+    setEducation([
+      ...education,
+      { school: '', degree: '', fieldOfStudy: '', gradYear: '' },
+    ]);
+  };
+
+  const removeEducation = (index: number) => {
+    if (education.length <= 1) return;
+    setEducation(education.filter((_, i) => i !== index));
+  };
+
+  const updateEducation = (index: number, field: keyof EducationItem, value: string) => {
+    const updated = [...education];
+    updated[index][field] = value;
+    setEducation(updated);
+  };
+
+  const validateCurrentStep = (): boolean => {
+    setClientError(null);
+    if (step === 1) {
+      if (!personal.firstName || !personal.lastName || !personal.email) {
+        setClientError('Please fill out all required personal fields.');
+        return false;
+      }
+    }
+    if (step === 2) {
+      if (experiences.some((e) => !e.company || !e.title)) {
+        setClientError('Please specify company and title for each experience row.');
+        return false;
+      }
+    }
+    if (step === 3) {
+      if (education.some((ed) => !ed.school || !ed.degree)) {
+        setClientError('Please specify school and degree for each education entry.');
+        return false;
+      }
+    }
+    return true;
+  };
+
+  const handleNext = () => {
+    if (validateCurrentStep()) {
+      setStep((s) => Math.min(6, s + 1));
+    }
+  };
+
   const handleSubmit = async () => {
     setSubmitting(true);
+    setClientError(null);
     try {
       const payload = {
         personal,
         experiences,
+        education,
         screening,
         resumeFileName,
       };
@@ -116,7 +190,7 @@ export default function DemoPortalPage() {
     }
   };
 
-  // SUCCESS PAGE
+  // STEP 7: SUCCESS PAGE
   if (submittedId) {
     return (
       <div className="min-h-screen bg-[#F7F8FB] text-[#475569] flex items-center justify-center p-4">
@@ -131,13 +205,13 @@ export default function DemoPortalPage() {
             </span>
             <h1 className="text-2xl font-black text-[#0F172A] font-heading">Application Received</h1>
             <p className="text-xs text-[#475569]">
-              Thank you for applying to <strong className="text-[#0F172A]">Enterprise Cloud Corp</strong>. Your application has been logged into our applicant tracking pipeline.
+              Thank you for applying to <strong className="text-[#0F172A]">Enterprise Cloud Corp</strong>. Your application has been logged into our Workday ATS pipeline.
             </p>
           </div>
 
           <div className="p-4 rounded-xl bg-[#F8FAFC] border border-[#E2E8F0] space-y-1">
             <span className="text-[10px] uppercase font-bold tracking-wider text-[#94A3B8]">
-              Official Confirmation ID
+              Official Confirmation Token
             </span>
             <p className="text-2xl font-black font-mono text-cyan-700 tracking-wider">
               {submittedId}
@@ -172,37 +246,45 @@ export default function DemoPortalPage() {
             W
           </div>
           <div>
-            <span className="font-bold text-[#0F172A] text-sm">Enterprise Cloud Careers</span>
-            <span className="text-xs text-[#94A3B8] block">Powered by Workday Recruiting</span>
+            <span className="font-bold text-[#0F172A] text-sm">Workday Recruiting Portal</span>
+            <span className="text-xs text-[#94A3B8] block">Enterprise Cloud Corp • Job Req REQ-2026-9812</span>
           </div>
         </div>
 
         <span className="text-xs font-semibold text-slate-500 bg-slate-100 px-3 py-1 rounded-full border border-slate-200">
-          Job Req: REQ-2026-9812
+          Target: Staff Systems Engineer
         </span>
       </header>
 
       {/* Main Form Container */}
       <main className="flex-1 max-w-3xl w-full mx-auto p-4 sm:p-6 lg:p-8 space-y-6">
-        {/* Progress Tracker */}
+        {/* Progress Tracker: 6 active steps leading to Step 7 success */}
         <div className="bg-white border border-[#E2E8F0] rounded-2xl p-4 shadow-sm">
           <div className="flex items-center justify-between text-xs font-bold text-[#0F172A] mb-3">
-            <span>Application Step {step} of 5</span>
+            <span>Application Step {step} of 6</span>
             <span className="text-cyan-700">
-              {step === 1 && 'Personal Information'}
-              {step === 2 && 'Work Experience'}
-              {step === 3 && 'Screening Questionnaire'}
-              {step === 4 && 'Resume & Attachments'}
-              {step === 5 && 'Review & Submit'}
+              {step === 1 && '1. Personal Information'}
+              {step === 2 && '2. Work Experience'}
+              {step === 3 && '3. Education History'}
+              {step === 4 && '4. Screening Questionnaire'}
+              {step === 5 && '5. Resume Upload'}
+              {step === 6 && '6. Review & Submit'}
             </span>
           </div>
           <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
             <div
               className="bg-cyan-600 h-full transition-all duration-300 rounded-full"
-              style={{ width: `${(step / 5) * 100}%` }}
+              style={{ width: `${(step / 6) * 100}%` }}
             />
           </div>
         </div>
+
+        {clientError && (
+          <div className="p-3.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+            <span>{clientError}</span>
+          </div>
+        )}
 
         {/* STEP 1: Personal Info */}
         {step === 1 && (
@@ -213,7 +295,7 @@ export default function DemoPortalPage() {
               </div>
               <div>
                 <h2 className="text-lg font-black text-[#0F172A] font-heading">Personal Information</h2>
-                <p className="text-xs text-[#475569]">Please enter your legal name and contact details.</p>
+                <p className="text-xs text-[#475569]">Please enter your contact and legal identity details.</p>
               </div>
             </div>
 
@@ -224,7 +306,7 @@ export default function DemoPortalPage() {
                   type="text"
                   value={personal.firstName}
                   onChange={(e) => setPersonal({ ...personal, firstName: e.target.value })}
-                  className="w-full p-2.5 rounded-xl bg-[#F8FAFC] border border-[#E2E8F0] text-[#0F172A] focus:bg-white focus:outline-none focus:ring-2 focus:ring-cyan-500/20 focus:border-cyan-600 font-medium"
+                  className="w-full p-2.5 rounded-xl bg-[#F8FAFC] border border-[#E2E8F0] text-[#0F172A] font-medium"
                 />
               </div>
 
@@ -234,7 +316,7 @@ export default function DemoPortalPage() {
                   type="text"
                   value={personal.lastName}
                   onChange={(e) => setPersonal({ ...personal, lastName: e.target.value })}
-                  className="w-full p-2.5 rounded-xl bg-[#F8FAFC] border border-[#E2E8F0] text-[#0F172A] focus:bg-white focus:outline-none focus:ring-2 focus:ring-cyan-500/20 focus:border-cyan-600 font-medium"
+                  className="w-full p-2.5 rounded-xl bg-[#F8FAFC] border border-[#E2E8F0] text-[#0F172A] font-medium"
                 />
               </div>
 
@@ -244,47 +326,47 @@ export default function DemoPortalPage() {
                   type="email"
                   value={personal.email}
                   onChange={(e) => setPersonal({ ...personal, email: e.target.value })}
-                  className="w-full p-2.5 rounded-xl bg-[#F8FAFC] border border-[#E2E8F0] text-[#0F172A] focus:bg-white focus:outline-none focus:ring-2 focus:ring-cyan-500/20 focus:border-cyan-600 font-medium"
+                  className="w-full p-2.5 rounded-xl bg-[#F8FAFC] border border-[#E2E8F0] text-[#0F172A] font-medium"
                 />
               </div>
 
               <div>
                 <label className="font-bold text-[#0F172A] block mb-1.5">Phone Number *</label>
                 <input
-                  type="tel"
+                  type="text"
                   value={personal.phone}
                   onChange={(e) => setPersonal({ ...personal, phone: e.target.value })}
-                  className="w-full p-2.5 rounded-xl bg-[#F8FAFC] border border-[#E2E8F0] text-[#0F172A] focus:bg-white focus:outline-none focus:ring-2 focus:ring-cyan-500/20 focus:border-cyan-600 font-medium"
-                />
-              </div>
-
-              <div>
-                <label className="font-bold text-[#0F172A] block mb-1.5">City *</label>
-                <input
-                  type="text"
-                  value={personal.city}
-                  onChange={(e) => setPersonal({ ...personal, city: e.target.value })}
-                  className="w-full p-2.5 rounded-xl bg-[#F8FAFC] border border-[#E2E8F0] text-[#0F172A] focus:bg-white focus:outline-none focus:ring-2 focus:ring-cyan-500/20 focus:border-cyan-600 font-medium"
-                />
-              </div>
-
-              <div>
-                <label className="font-bold text-[#0F172A] block mb-1.5">Country *</label>
-                <input
-                  type="text"
-                  value={personal.country}
-                  onChange={(e) => setPersonal({ ...personal, country: e.target.value })}
-                  className="w-full p-2.5 rounded-xl bg-[#F8FAFC] border border-[#E2E8F0] text-[#0F172A] focus:bg-white focus:outline-none focus:ring-2 focus:ring-cyan-500/20 focus:border-cyan-600 font-medium"
+                  className="w-full p-2.5 rounded-xl bg-[#F8FAFC] border border-[#E2E8F0] text-[#0F172A] font-medium"
                 />
               </div>
 
               <div className="sm:col-span-2">
-                <label className="font-bold text-[#0F172A] block mb-1.5">LinkedIn Profile URL</label>
+                <label className="font-bold text-[#0F172A] block mb-1.5">Street Address</label>
                 <input
-                  type="url"
+                  type="text"
+                  value={personal.address}
+                  onChange={(e) => setPersonal({ ...personal, address: e.target.value })}
+                  className="w-full p-2.5 rounded-xl bg-[#F8FAFC] border border-[#E2E8F0] text-[#0F172A] font-medium"
+                />
+              </div>
+
+              <div>
+                <label className="font-bold text-[#0F172A] block mb-1.5">City & Country</label>
+                <input
+                  type="text"
+                  value={`${personal.city}, ${personal.country}`}
+                  onChange={(e) => setPersonal({ ...personal, city: e.target.value })}
+                  className="w-full p-2.5 rounded-xl bg-[#F8FAFC] border border-[#E2E8F0] text-[#0F172A] font-medium"
+                />
+              </div>
+
+              <div>
+                <label className="font-bold text-[#0F172A] block mb-1.5">LinkedIn Profile</label>
+                <input
+                  type="text"
                   value={personal.linkedin}
                   onChange={(e) => setPersonal({ ...personal, linkedin: e.target.value })}
-                  className="w-full p-2.5 rounded-xl bg-[#F8FAFC] border border-[#E2E8F0] text-[#0F172A] focus:bg-white focus:outline-none focus:ring-2 focus:ring-cyan-500/20 focus:border-cyan-600 font-medium"
+                  className="w-full p-2.5 rounded-xl bg-[#F8FAFC] border border-[#E2E8F0] text-[#0F172A] font-medium"
                 />
               </div>
             </div>
@@ -301,14 +383,14 @@ export default function DemoPortalPage() {
                 </div>
                 <div>
                   <h2 className="text-lg font-black text-[#0F172A] font-heading">Work Experience</h2>
-                  <p className="text-xs text-[#475569]">Add previous relevant roles and accomplishments.</p>
+                  <p className="text-xs text-[#475569]">Add your past and current professional roles.</p>
                 </div>
               </div>
 
               <button
                 type="button"
                 onClick={addExperience}
-                className="px-3 py-1.5 rounded-xl bg-cyan-50 text-cyan-700 hover:bg-cyan-100 border border-cyan-200 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
+                className="px-3 py-1.5 rounded-xl bg-cyan-50 hover:bg-cyan-100 text-cyan-800 text-xs font-bold flex items-center gap-1.5 border border-cyan-200 transition-all cursor-pointer"
               >
                 <Plus className="w-3.5 h-3.5" />
                 <span>Add Position</span>
@@ -317,76 +399,65 @@ export default function DemoPortalPage() {
 
             <div className="space-y-4">
               {experiences.map((exp, idx) => (
-                <div
-                  key={idx}
-                  className="p-5 rounded-2xl border border-[#E2E8F0] bg-[#F8FAFC] space-y-4 relative"
-                >
-                  <div className="flex items-center justify-between pb-2 border-b border-[#E2E8F0]">
-                    <span className="font-bold text-[#0F172A] text-xs">Position #{idx + 1}</span>
+                <div key={idx} className="p-4 rounded-xl bg-[#F8FAFC] border border-[#E2E8F0] space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-[#0F172A]">Position {idx + 1}</span>
                     {experiences.length > 1 && (
                       <button
                         type="button"
                         onClick={() => removeExperience(idx)}
-                        className="text-rose-600 hover:text-rose-700 p-1 cursor-pointer"
-                        title="Remove position"
+                        className="text-xs text-rose-600 hover:text-rose-700 font-semibold flex items-center gap-1 cursor-pointer"
                       >
-                        <Trash2 className="w-4 h-4" />
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>Remove</span>
                       </button>
                     )}
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
                     <div>
-                      <label className="font-bold text-[#0F172A] block mb-1">Company *</label>
+                      <label className="font-semibold text-[#0F172A] block mb-1">Company *</label>
                       <input
                         type="text"
                         value={exp.company}
                         onChange={(e) => updateExperience(idx, 'company', e.target.value)}
-                        placeholder="Company Name"
-                        className="w-full p-2.5 rounded-xl bg-white border border-[#E2E8F0] text-[#0F172A] font-medium"
+                        className="w-full p-2 rounded-lg bg-white border border-[#E2E8F0] text-[#0F172A]"
                       />
                     </div>
-
                     <div>
-                      <label className="font-bold text-[#0F172A] block mb-1">Job Title *</label>
+                      <label className="font-semibold text-[#0F172A] block mb-1">Job Title *</label>
                       <input
                         type="text"
                         value={exp.title}
                         onChange={(e) => updateExperience(idx, 'title', e.target.value)}
-                        placeholder="Title"
-                        className="w-full p-2.5 rounded-xl bg-white border border-[#E2E8F0] text-[#0F172A] font-medium"
+                        className="w-full p-2 rounded-lg bg-white border border-[#E2E8F0] text-[#0F172A]"
                       />
                     </div>
-
                     <div>
-                      <label className="font-bold text-[#0F172A] block mb-1">Start Date *</label>
+                      <label className="font-semibold text-[#0F172A] block mb-1">Start Date</label>
                       <input
                         type="text"
                         value={exp.start}
                         onChange={(e) => updateExperience(idx, 'start', e.target.value)}
-                        placeholder="YYYY-MM"
-                        className="w-full p-2.5 rounded-xl bg-white border border-[#E2E8F0] text-[#0F172A] font-medium"
+                        className="w-full p-2 rounded-lg bg-white border border-[#E2E8F0] text-[#0F172A]"
                       />
                     </div>
-
                     <div>
-                      <label className="font-bold text-[#0F172A] block mb-1">End Date *</label>
+                      <label className="font-semibold text-[#0F172A] block mb-1">End Date</label>
                       <input
                         type="text"
                         value={exp.end}
                         onChange={(e) => updateExperience(idx, 'end', e.target.value)}
-                        placeholder="YYYY-MM or Present"
-                        className="w-full p-2.5 rounded-xl bg-white border border-[#E2E8F0] text-[#0F172A] font-medium"
+                        className="w-full p-2 rounded-lg bg-white border border-[#E2E8F0] text-[#0F172A]"
                       />
                     </div>
-
                     <div className="sm:col-span-2">
-                      <label className="font-bold text-[#0F172A] block mb-1">Key Responsibilities</label>
+                      <label className="font-semibold text-[#0F172A] block mb-1">Responsibilities</label>
                       <textarea
-                        rows={3}
+                        rows={2}
                         value={exp.summary}
                         onChange={(e) => updateExperience(idx, 'summary', e.target.value)}
-                        className="w-full p-2.5 rounded-xl bg-white border border-[#E2E8F0] text-[#0F172A] font-medium text-xs resize-none"
+                        className="w-full p-2 rounded-lg bg-white border border-[#E2E8F0] text-[#0F172A]"
                       />
                     </div>
                   </div>
@@ -396,8 +467,93 @@ export default function DemoPortalPage() {
           </div>
         )}
 
-        {/* STEP 3: Screening Questionnaire */}
+        {/* STEP 3: Education Repeater */}
         {step === 3 && (
+          <div className="bg-white border border-[#E2E8F0] rounded-2xl p-6 sm:p-8 shadow-sm space-y-6">
+            <div className="flex items-center justify-between pb-4 border-b border-[#E2E8F0]">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 rounded-xl bg-cyan-50 border border-cyan-200 text-cyan-600">
+                  <GraduationCap className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-black text-[#0F172A] font-heading">Education History</h2>
+                  <p className="text-xs text-[#475569]">Add your academic background and degrees.</p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={addEducation}
+                className="px-3 py-1.5 rounded-xl bg-cyan-50 hover:bg-cyan-100 text-cyan-800 text-xs font-bold flex items-center gap-1.5 border border-cyan-200 transition-all cursor-pointer"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Add School</span>
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              {education.map((ed, idx) => (
+                <div key={idx} className="p-4 rounded-xl bg-[#F8FAFC] border border-[#E2E8F0] space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-[#0F172A]">Degree {idx + 1}</span>
+                    {education.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => removeEducation(idx)}
+                        className="text-xs text-rose-600 hover:text-rose-700 font-semibold flex items-center gap-1 cursor-pointer"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>Remove</span>
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                    <div>
+                      <label className="font-semibold text-[#0F172A] block mb-1">Institution / School *</label>
+                      <input
+                        type="text"
+                        value={ed.school}
+                        onChange={(e) => updateEducation(idx, 'school', e.target.value)}
+                        className="w-full p-2 rounded-lg bg-white border border-[#E2E8F0] text-[#0F172A]"
+                      />
+                    </div>
+                    <div>
+                      <label className="font-semibold text-[#0F172A] block mb-1">Degree *</label>
+                      <input
+                        type="text"
+                        value={ed.degree}
+                        onChange={(e) => updateEducation(idx, 'degree', e.target.value)}
+                        className="w-full p-2 rounded-lg bg-white border border-[#E2E8F0] text-[#0F172A]"
+                      />
+                    </div>
+                    <div>
+                      <label className="font-semibold text-[#0F172A] block mb-1">Field of Study</label>
+                      <input
+                        type="text"
+                        value={ed.fieldOfStudy}
+                        onChange={(e) => updateEducation(idx, 'fieldOfStudy', e.target.value)}
+                        className="w-full p-2 rounded-lg bg-white border border-[#E2E8F0] text-[#0F172A]"
+                      />
+                    </div>
+                    <div>
+                      <label className="font-semibold text-[#0F172A] block mb-1">Graduation Year</label>
+                      <input
+                        type="text"
+                        value={ed.gradYear}
+                        onChange={(e) => updateEducation(idx, 'gradYear', e.target.value)}
+                        className="w-full p-2 rounded-lg bg-white border border-[#E2E8F0] text-[#0F172A]"
+                      />
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* STEP 4: Screening Questions */}
+        {step === 4 && (
           <div className="bg-white border border-[#E2E8F0] rounded-2xl p-6 sm:p-8 shadow-sm space-y-6">
             <div className="flex items-center gap-3 pb-4 border-b border-[#E2E8F0]">
               <div className="p-2.5 rounded-xl bg-cyan-50 border border-cyan-200 text-cyan-600">
@@ -405,164 +561,120 @@ export default function DemoPortalPage() {
               </div>
               <div>
                 <h2 className="text-lg font-black text-[#0F172A] font-heading">Screening Questionnaire</h2>
-                <p className="text-xs text-[#475569]">Answer the following compliance and suitability questions.</p>
+                <p className="text-xs text-[#475569]">Answer required role suitability and sponsorship questions.</p>
               </div>
             </div>
 
             <div className="space-y-4 text-xs">
-              {/* Q1 */}
-              <div className="p-4 rounded-xl bg-[#F8FAFC] border border-[#E2E8F0] space-y-2">
-                <p className="font-bold text-[#0F172A]">Are you legally authorized to work in this country?</p>
-                <div className="flex items-center gap-4">
-                  <label className="flex items-center gap-2 cursor-pointer">
+              <div>
+                <label className="font-bold text-[#0F172A] block mb-1.5">
+                  Are you legally authorized to work in India / target location? *
+                </label>
+                <div className="flex gap-4">
+                  <label className="flex items-center gap-1.5 cursor-pointer">
                     <input
                       type="radio"
-                      name="authorized"
+                      name="auth"
                       checked={screening.authorized === 'yes'}
                       onChange={() => setScreening({ ...screening, authorized: 'yes' })}
-                      className="accent-cyan-600"
+                      className="text-cyan-600"
                     />
                     <span>Yes</span>
                   </label>
-                  <label className="flex items-center gap-2 cursor-pointer">
+                  <label className="flex items-center gap-1.5 cursor-pointer">
                     <input
                       type="radio"
-                      name="authorized"
+                      name="auth"
                       checked={screening.authorized === 'no'}
                       onChange={() => setScreening({ ...screening, authorized: 'no' })}
-                      className="accent-cyan-600"
+                      className="text-cyan-600"
                     />
                     <span>No</span>
                   </label>
                 </div>
               </div>
 
-              {/* Q2 */}
-              <div className="p-4 rounded-xl bg-[#F8FAFC] border border-[#E2E8F0] space-y-2">
-                <p className="font-bold text-[#0F172A]">Will you now or in the future require visa sponsorship?</p>
-                <div className="flex items-center gap-4">
-                  <label className="flex items-center gap-2 cursor-pointer">
+              <div>
+                <label className="font-bold text-[#0F172A] block mb-1.5">
+                  Will you now or in the future require visa sponsorship? *
+                </label>
+                <div className="flex gap-4">
+                  <label className="flex items-center gap-1.5 cursor-pointer">
                     <input
                       type="radio"
                       name="sponsorship"
                       checked={screening.sponsorship === 'yes'}
                       onChange={() => setScreening({ ...screening, sponsorship: 'yes' })}
-                      className="accent-cyan-600"
+                      className="text-cyan-600"
                     />
                     <span>Yes</span>
                   </label>
-                  <label className="flex items-center gap-2 cursor-pointer">
+                  <label className="flex items-center gap-1.5 cursor-pointer">
                     <input
                       type="radio"
                       name="sponsorship"
                       checked={screening.sponsorship === 'no'}
                       onChange={() => setScreening({ ...screening, sponsorship: 'no' })}
-                      className="accent-cyan-600"
+                      className="text-cyan-600"
                     />
                     <span>No</span>
                   </label>
                 </div>
               </div>
 
-              {/* Q3 */}
-              <div className="p-4 rounded-xl bg-[#F8FAFC] border border-[#E2E8F0] space-y-2">
-                <p className="font-bold text-[#0F172A]">Are you willing to travel for business as required (up to 20%)?</p>
-                <div className="flex items-center gap-4">
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="radio"
-                      name="travel"
-                      checked={screening.travel === 'yes'}
-                      onChange={() => setScreening({ ...screening, travel: 'yes' })}
-                      className="accent-cyan-600"
-                    />
-                    <span>Yes</span>
-                  </label>
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="radio"
-                      name="travel"
-                      checked={screening.travel === 'no'}
-                      onChange={() => setScreening({ ...screening, travel: 'no' })}
-                      className="accent-cyan-600"
-                    />
-                    <span>No</span>
-                  </label>
-                </div>
-              </div>
-
-              {/* Q4 */}
-              <div className="p-4 rounded-xl bg-[#F8FAFC] border border-[#E2E8F0] space-y-2">
-                <p className="font-bold text-[#0F172A]">Are you willing to relocate if required?</p>
-                <div className="flex items-center gap-4">
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="radio"
-                      name="relocate"
-                      checked={screening.relocate === 'yes'}
-                      onChange={() => setScreening({ ...screening, relocate: 'yes' })}
-                      className="accent-cyan-600"
-                    />
-                    <span>Yes</span>
-                  </label>
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="radio"
-                      name="relocate"
-                      checked={screening.relocate === 'no'}
-                      onChange={() => setScreening({ ...screening, relocate: 'no' })}
-                      className="accent-cyan-600"
-                    />
-                    <span>No</span>
-                  </label>
-                </div>
-              </div>
-
-              {/* Why This Role Textarea */}
               <div>
-                <label className="font-bold text-[#0F172A] block mb-1.5">Why are you interested in this role? *</label>
+                <label className="font-bold text-[#0F172A] block mb-1.5">Why are you interested in this role?</label>
                 <textarea
-                  rows={4}
+                  rows={2}
                   value={screening.whyThisRole}
                   onChange={(e) => setScreening({ ...screening, whyThisRole: e.target.value })}
-                  className="w-full p-3 rounded-xl bg-[#F8FAFC] border border-[#E2E8F0] text-[#0F172A] text-xs leading-relaxed resize-none font-medium"
+                  className="w-full p-2.5 rounded-xl bg-[#F8FAFC] border border-[#E2E8F0] text-[#0F172A]"
+                />
+              </div>
+
+              <div>
+                <label className="font-bold text-[#0F172A] block mb-1.5">Describe a challenging technical project you delivered</label>
+                <textarea
+                  rows={2}
+                  value={screening.challengingProject}
+                  onChange={(e) => setScreening({ ...screening, challengingProject: e.target.value })}
+                  className="w-full p-2.5 rounded-xl bg-[#F8FAFC] border border-[#E2E8F0] text-[#0F172A]"
                 />
               </div>
             </div>
           </div>
         )}
 
-        {/* STEP 4: Resume Attachment */}
-        {step === 4 && (
+        {/* STEP 5: Resume Upload */}
+        {step === 5 && (
           <div className="bg-white border border-[#E2E8F0] rounded-2xl p-6 sm:p-8 shadow-sm space-y-6">
             <div className="flex items-center gap-3 pb-4 border-b border-[#E2E8F0]">
               <div className="p-2.5 rounded-xl bg-cyan-50 border border-cyan-200 text-cyan-600">
-                <Upload className="w-5 h-5" />
+                <FileText className="w-5 h-5" />
               </div>
               <div>
-                <h2 className="text-lg font-black text-[#0F172A] font-heading">Resume / CV Document</h2>
-                <p className="text-xs text-[#475569]">Upload your verified PDF resume.</p>
+                <h2 className="text-lg font-black text-[#0F172A] font-heading">Resume / CV Attachment</h2>
+                <p className="text-xs text-[#475569]">Attach your tailored resume for the hiring committee.</p>
               </div>
             </div>
 
-            <div className="border-2 border-dashed border-cyan-300 bg-[#ECFEFF]/40 rounded-2xl p-8 text-center space-y-3">
-              <FileCheck className="w-10 h-10 text-cyan-600 mx-auto" />
-              <div>
-                <p className="font-bold text-[#0F172A] text-xs">{resumeFileName}</p>
-                <p className="text-[11px] text-[#94A3B8]">PDF format • Verified 1-page standard</p>
+            <div className="p-6 rounded-2xl border-2 border-dashed border-cyan-200 bg-cyan-50/40 text-center space-y-3">
+              <div className="w-12 h-12 rounded-xl bg-cyan-600 text-white flex items-center justify-center mx-auto shadow-sm">
+                <FileCheck className="w-6 h-6" />
               </div>
-              <button
-                type="button"
-                className="px-4 py-2 rounded-xl bg-white border border-[#CBD5E1] text-[#0F172A] text-xs font-bold shadow-xs hover:bg-slate-50 cursor-pointer"
-              >
-                Replace Document
-              </button>
+              <div>
+                <p className="text-sm font-bold text-[#0F172A]">{resumeFileName}</p>
+                <p className="text-xs text-[#94A3B8]">Auto-tailored by CareerPilot AI (Verified 95% ATS match)</p>
+              </div>
+              <span className="inline-block px-3 py-1 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200">
+                ✓ Ready for automated submission
+              </span>
             </div>
           </div>
         )}
 
-        {/* STEP 5: Review & Submit */}
-        {step === 5 && (
+        {/* STEP 6: Review & Final Submit */}
+        {step === 6 && (
           <div className="bg-white border border-[#E2E8F0] rounded-2xl p-6 sm:p-8 shadow-sm space-y-6">
             <div className="flex items-center gap-3 pb-4 border-b border-[#E2E8F0]">
               <div className="p-2.5 rounded-xl bg-cyan-50 border border-cyan-200 text-cyan-600">
@@ -570,53 +682,52 @@ export default function DemoPortalPage() {
               </div>
               <div>
                 <h2 className="text-lg font-black text-[#0F172A] font-heading">Review & Confirm</h2>
-                <p className="text-xs text-[#475569]">Review all entered details before final submission.</p>
+                <p className="text-xs text-[#475569]">Please verify all entered details before official dispatch.</p>
               </div>
             </div>
 
-            <div className="space-y-4 text-xs">
-              <div className="p-4 rounded-xl bg-[#F8FAFC] border border-[#E2E8F0] space-y-2">
-                <span className="font-bold text-[#0F172A] block uppercase text-[10px] tracking-wider text-[#94A3B8]">
-                  Candidate
-                </span>
-                <p className="font-bold text-[#0F172A]">{personal.firstName} {personal.lastName}</p>
-                <p className="text-[#475569]">{personal.email} • {personal.phone} • {personal.city}, {personal.country}</p>
+            <div className="space-y-4 text-xs divide-y divide-[#E2E8F0]">
+              <div className="space-y-1">
+                <span className="font-bold text-[#0F172A] block">Personal Information</span>
+                <p className="text-[#475569]">
+                  {personal.firstName} {personal.lastName} • {personal.email} • {personal.phone}
+                </p>
+                <p className="text-[#94A3B8]">{personal.city}, {personal.country}</p>
               </div>
 
-              <div className="p-4 rounded-xl bg-[#F8FAFC] border border-[#E2E8F0] space-y-2">
-                <span className="font-bold text-[#0F172A] block uppercase text-[10px] tracking-wider text-[#94A3B8]">
-                  Experience Overview
-                </span>
-                {experiences.map((exp, i) => (
-                  <div key={i} className="text-[#475569]">
-                    <strong className="text-[#0F172A]">{exp.title}</strong> at {exp.company} ({exp.start} - {exp.end})
-                  </div>
+              <div className="pt-3 space-y-1">
+                <span className="font-bold text-[#0F172A] block">Work Experience</span>
+                {experiences.map((exp, idx) => (
+                  <p key={idx} className="text-[#475569]">
+                    • <strong>{exp.title}</strong> at {exp.company} ({exp.start} - {exp.end})
+                  </p>
                 ))}
               </div>
 
-              <div className="p-4 rounded-xl bg-[#F8FAFC] border border-[#E2E8F0] space-y-2">
-                <span className="font-bold text-[#0F172A] block uppercase text-[10px] tracking-wider text-[#94A3B8]">
-                  Screening Responses
-                </span>
-                <p className="text-[#475569]">Authorized: {screening.authorized.toUpperCase()} | Sponsorship: {screening.sponsorship.toUpperCase()}</p>
-                <p className="text-[#475569] italic">&ldquo;{screening.whyThisRole}&rdquo;</p>
+              <div className="pt-3 space-y-1">
+                <span className="font-bold text-[#0F172A] block">Education</span>
+                {education.map((ed, idx) => (
+                  <p key={idx} className="text-[#475569]">
+                    • <strong>{ed.degree}</strong>, {ed.school} ({ed.gradYear})
+                  </p>
+                ))}
               </div>
 
-              <div className="p-4 rounded-xl bg-[#F8FAFC] border border-[#E2E8F0] flex items-center justify-between">
-                <span className="font-bold text-[#0F172A]">Attached Resume</span>
-                <span className="text-cyan-700 font-semibold">{resumeFileName}</span>
+              <div className="pt-3 space-y-1">
+                <span className="font-bold text-[#0F172A] block">Attached Resume</span>
+                <p className="text-[#475569]">📄 {resumeFileName}</p>
               </div>
             </div>
           </div>
         )}
 
-        {/* Navigation Controls */}
+        {/* Bottom Navigation Buttons */}
         <div className="flex items-center justify-between pt-2">
           {step > 1 ? (
             <button
               type="button"
-              onClick={() => setStep(step - 1)}
-              className="px-4 py-2 rounded-xl border border-[#CBD5E1] bg-white hover:bg-slate-50 text-[#0F172A] text-xs font-bold shadow-xs flex items-center gap-1.5 cursor-pointer"
+              onClick={() => setStep((s) => Math.max(1, s - 1))}
+              className="px-4 py-2 rounded-xl border border-[#CBD5E1] bg-white hover:bg-slate-50 text-[#0F172A] text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer"
             >
               <ChevronLeft className="w-4 h-4" />
               <span>Back</span>
@@ -625,11 +736,11 @@ export default function DemoPortalPage() {
             <div />
           )}
 
-          {step < 5 ? (
+          {step < 6 ? (
             <button
               type="button"
-              onClick={() => setStep(step + 1)}
-              className="px-5 py-2.5 rounded-xl bg-cyan-600 hover:bg-cyan-700 text-white text-xs font-bold shadow-sm flex items-center gap-1.5 cursor-pointer"
+              onClick={handleNext}
+              className="px-5 py-2.5 rounded-xl bg-cyan-600 hover:bg-cyan-700 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
             >
               <span>Next Step</span>
               <ChevronRight className="w-4 h-4" />
@@ -637,11 +748,12 @@ export default function DemoPortalPage() {
           ) : (
             <button
               type="button"
-              onClick={handleSubmit}
               disabled={submitting}
-              className="px-6 py-2.5 rounded-xl bg-cyan-600 hover:bg-cyan-700 text-white text-xs font-bold shadow-sm flex items-center gap-2 cursor-pointer active:scale-95"
+              onClick={handleSubmit}
+              className="px-6 py-2.5 rounded-xl bg-cyan-600 hover:bg-cyan-700 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all cursor-pointer disabled:opacity-60"
             >
-              {submitting ? 'Submitting Application...' : 'Submit Application'}
+              <span>{submitting ? 'Transmitting to Workday...' : 'Submit Application'}</span>
+              <CheckCircle2 className="w-4 h-4" />
             </button>
           )}
         </div>

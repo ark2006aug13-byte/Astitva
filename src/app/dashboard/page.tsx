@@ -41,7 +41,7 @@ import {
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { sounds } from '@/utils/sound';
-import { JoinedJobMatch } from '@/lib/scout-agent';
+import type { JoinedJobMatch } from '@/lib/scout-agent';
 
 interface ToastState {
   show: boolean;
@@ -102,6 +102,7 @@ export default function DashboardPage() {
   const [loadingJobs, setLoadingJobs] = useState(false);
   const [interviews, setInterviews] = useState<any[]>([]);
   const [isScanning, setIsScanning] = useState(false);
+  const [scanProgressText, setScanProgressText] = useState("Scanning Live Market...");
   const [scanStats, setScanStats] = useState<{
     found: number;
     matched: number;
@@ -774,7 +775,7 @@ export default function DashboardPage() {
                 }`}
               >
                 <RefreshCw className={`w-4 h-4 ${isScanning ? 'animate-spin text-slate-500' : 'text-white'}`} />
-                <span>{isScanning ? 'Scanning Live Market...' : 'Run new scan'}</span>
+                <span>{isScanning ? scanProgressText : 'Run new scan'}</span>
               </button>
             </div>
 
