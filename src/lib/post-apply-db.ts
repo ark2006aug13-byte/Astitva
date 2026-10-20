@@ -621,6 +621,29 @@ export const postApplyDb = {
     return null;
   },
 
+  async getLastResearchMethod(): Promise<'tinyfish_live' | 'mock_fixture' | null> {
+    const list = Array.from(store.researchAudits.values()).sort(
+      (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    );
+    if (list.length > 0) return list[0].research_method;
+
+    try {
+      const { data, error } = await supabase
+        .from('research_audit_logs')
+        .select('research_method')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (!error && data?.research_method) {
+        return data.research_method as 'tinyfish_live' | 'mock_fixture';
+      }
+    } catch {
+      // Ignore
+    }
+    return null;
+  },
+
   // ===================== EMAIL DISPATCH LOGS =====================
   async saveEmailDispatch(record: Omit<EmailDispatchRecord, 'id' | 'sent_at'> & { id?: string }): Promise<EmailDispatchRecord> {
     const id = record.id || `ed-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;

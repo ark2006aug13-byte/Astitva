@@ -128,7 +128,7 @@ export default function JobDetailPage() {
     recent: { label: 'Recent (<7d)', bg: 'bg-slate-100 text-slate-700 border-slate-200' },
     stale: { label: 'Possibly Stale (>21d)', bg: 'bg-amber-50 text-amber-700 border-amber-200' },
   };
-  const badgeStyle = freshnessLabels[freshness] || freshnessLabels.recent;
+  const badgeStyle = (freshnessLabels as any)[freshness] || freshnessLabels.recent;
 
   return (
     <div className="min-h-screen bg-[#F7F8FB] text-[#0F172A] antialiased">
@@ -188,6 +188,15 @@ export default function JobDetailPage() {
                   </span>
                   <span className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-600 text-[10px] font-bold uppercase tracking-wider">
                     {job.portal_type}
+                  </span>
+                  <span
+                    className={`px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider ${
+                      job.ingestion_method === 'tinyfish'
+                        ? 'bg-slate-100 text-slate-700 border border-slate-200'
+                        : 'bg-amber-50 text-amber-800 border border-amber-200'
+                    }`}
+                  >
+                    src: {job.ingestion_method === 'tinyfish' ? 'tinyfish' : 'fixture'}
                   </span>
                 </div>
               </div>

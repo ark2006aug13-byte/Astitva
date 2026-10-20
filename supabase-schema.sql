@@ -458,3 +458,11 @@ CREATE POLICY "Allow public read on company_profiles" ON public.company_profiles
 CREATE POLICY "Allow users to read/write job_matches_cache" ON public.job_matches_cache FOR ALL USING (true);
 CREATE POLICY "Allow read on ingestion_runs" ON public.ingestion_runs FOR ALL USING (true);
 CREATE POLICY "Allow users to manage custom_scan_requests" ON public.custom_scan_requests FOR ALL USING (true);
+
+
+-- =========================================================================
+-- SECTION 12: DATA PROVENANCE (TINYFISH VS FIXTURES)
+-- =========================================================================
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS ingestion_method text DEFAULT 'unknown';
+ALTER TABLE ingestion_runs ADD COLUMN IF NOT EXISTS method text DEFAULT 'tinyfish_live';
+ALTER TABLE ingestion_runs ADD COLUMN IF NOT EXISTS error text;

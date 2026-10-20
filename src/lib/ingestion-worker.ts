@@ -87,8 +87,20 @@ export async function executeIngestionRun(options: IngestionOptions = {}): Promi
     }
 
     // 3. Ingestion Loop across Queries & Sources
-    const apiKey = process.env.TINYFISH_API_KEY || '';
-    const hasLiveTinyFish = Boolean(apiKey && apiKey.trim() && !apiKey.includes('placeholder'));
+    const { getEnvStatus } = await import('@/lib/env');
+    const envState = getEnvStatus();
+    const hasLiveTinyFish = envState.tinyfish;
+    let ingestionMethod: 'tinyfish' | 'fixture' = 'fixture';
+    let runMethod: 'tinyfish_live' | 'fixture' | 'failed' = 'fixture';
+
+    if (hasLiveTinyFish) {
+      ingestionMethod = 'tinyfish';
+      runMethod = 'tinyfish_live';
+    } else {
+      console.warn("FALLBACK: fixtures in use - TINYFISH_API_KEY missing");
+      ingestionMethod = 'fixture';
+      runMethod = 'fixture';
+    }
 
     for (const query of activeQueries) {
       // Budget guard: stop if 60 calls reached
@@ -100,23 +112,29 @@ export async function executeIngestionRun(options: IngestionOptions = {}): Promi
 
       let rawBatch: any[] = [];
 
-      if (hasLiveTinyFish && getTinyFishCallsCount() < maxBudget) {
-        try {
-          const liveResult = await searchJobsWithTinyFish(query, {
-            limit: 8,
-          });
-          rawBatch = liveResult.jobs || [];
-        } catch (err) {
-          console.warn(`[Ingestion Worker] Live search failed for query "${query}", using fixture source:`, err);
+      if (hasLiveTinyFish) {
+        if (getTinyFishCallsCount() < maxBudget) {
+          try {
+            const liveResult = await searchJobsWithTinyFish(query, {
+              limit: 8,
+            });
+            rawBatch = liveResult.jobs || [];
+          } catch (err: any) {
+            console.error(`[Ingestion Worker] Live search failed for query "${query}":`, err);
+            // On TinyFish failure: write ingestion_runs row with status='failed' and error text, insert ZERO fixture jobs
+            await jobPoolDb.updateIngestionRun(initialRun.id, {
+              status: 'failed',
+              method: 'failed',
+              error: err?.message || 'TinyFish live scraping failed',
+              finished_at: new Date().toISOString(),
+            });
+            throw err;
+          }
         }
-      }
-
-      // Supplement with high-fidelity source fixture to ensure rich pool building
-      const fixtureBatch = generateFixturePoolBatch(query, Math.max(12, 16 - rawBatch.length));
-      for (const item of fixtureBatch) {
-        if (!rawBatch.some((b) => b.company.toLowerCase() === item.company.toLowerCase())) {
-          rawBatch.push(item);
-        }
+      } else {
+        // Fixture adapter allowed ONLY when env.tinyfish is false
+        const fixtureBatch = generateFixturePoolBatch(query, 12);
+        rawBatch = fixtureBatch;
       }
 
       jobsFoundCount += rawBatch.length;
@@ -145,6 +163,7 @@ export async function executeIngestionRun(options: IngestionOptions = {}): Promi
           portal_type: portal,
           posted_at: rawJob.posted_at || new Date().toISOString(),
           ghost_flag: Boolean(rawJob.ghost_flag),
+          ingestion_method: ingestionMethod,
         });
 
         uniqueCompaniesSeen.add(rawJob.company);
@@ -217,6 +236,8 @@ export async function executeIngestionRun(options: IngestionOptions = {}): Promi
       jobs_closed: closedCount,
       tinyfish_calls: tinyfishCallsUsed,
       status: runStatus,
+      method: runMethod,
+      error: null,
     });
 
     // 9. Log Audit Event
@@ -255,6 +276,8 @@ export async function executeIngestionRun(options: IngestionOptions = {}): Promi
     console.error('[Ingestion Worker] Critical run failure:', error);
     await jobPoolDb.updateIngestionRun(initialRun.id, {
       status: 'failed',
+      method: 'failed',
+      error: error?.message || 'Ingestion run failed',
       finished_at: new Date().toISOString(),
     });
     throw error;

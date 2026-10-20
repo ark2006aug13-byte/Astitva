@@ -163,7 +163,7 @@ export async function GET(req: NextRequest) {
       }
 
       // Filter remote policy
-      if (preferences.remote_policy === 'Remote' && !job.is_remote) {
+      if (((preferences as any)?.remote_policy === 'Remote' || (preferences as any)?.remote_preference === 'Remote') && !job.is_remote) {
         return false;
       }
 
@@ -327,14 +327,24 @@ export async function GET(req: NextRequest) {
           reapply_after: isBlocked ? blockedJobMap.get(item.job.id) : null,
           jd_text: item.job.jd_text,
           url: item.job.url,
+          ingestion_method: item.job.ingestion_method || 'unknown',
         };
       });
+
+    // Market stats derivation (null if empty pool or <10 jobs)
+    const marketContext = openJobs.length >= 10 ? await jobPoolDb.getMarketContext('general') : null;
+    const marketStats = marketContext && marketContext.medianSalary > 0 ? {
+      median_salary: `₹${(marketContext.medianSalary / 100000).toFixed(1)}L / yr`,
+      trend: marketContext.weeklyPostingsTrend,
+      hot_skills: marketContext.hotSkills,
+    } : null;
 
     return NextResponse.json({
       jobs: enrichedResults,
       total: enrichedResults.length,
       pool_open_count: openJobs.length,
       fresh_boost_active: freshBoost,
+      market_stats: marketStats,
     });
   } catch (error: any) {
     console.error('Two-stage matching error:', error);

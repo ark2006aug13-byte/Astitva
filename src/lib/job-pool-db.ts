@@ -23,6 +23,7 @@ export interface PoolJob {
   status: 'open' | 'closed' | 'archived';
   ghost_flag: boolean;
   repost_count?: number;
+  ingestion_method?: 'tinyfish' | 'fixture' | 'unknown';
 }
 
 export interface CompanyProfile {
@@ -56,6 +57,8 @@ export interface IngestionRun {
   jobs_closed: number;
   tinyfish_calls: number;
   status: 'running' | 'completed' | 'failed' | 'partial';
+  method?: 'tinyfish_live' | 'fixture' | 'failed' | null;
+  error?: string | null;
 }
 
 export interface CustomScanRequest {
@@ -214,6 +217,7 @@ export const jobPoolDb = {
         category,
         salary_norm_min: normSal.normMin || existing.salary_norm_min,
         salary_norm_max: normSal.normMax || existing.salary_norm_max,
+        ingestion_method: (jobData as any).ingestion_method || existing.ingestion_method || 'unknown',
       };
 
       jobStore.set(existing.id, updatedJob);
@@ -271,6 +275,7 @@ export const jobPoolDb = {
       status: 'open',
       ghost_flag: Boolean(jobData.ghost_flag),
       repost_count: 1,
+      ingestion_method: (jobData as any).ingestion_method || 'unknown',
     };
 
     jobStore.set(id, newJob);
@@ -545,6 +550,8 @@ export const jobPoolDb = {
       jobs_closed: run.jobs_closed || 0,
       tinyfish_calls: run.tinyfish_calls || 0,
       status: run.status || 'running',
+      method: run.method || null,
+      error: run.error || null,
     };
 
     ingestionRunsStore.unshift(fullRun);
@@ -578,6 +585,30 @@ export const jobPoolDb = {
 
   async listIngestionRuns(limit = 10): Promise<IngestionRun[]> {
     return ingestionRunsStore.slice(0, limit);
+  },
+
+  async getLastIngestionRun(): Promise<IngestionRun | null> {
+    if (ingestionRunsStore.length > 0) return ingestionRunsStore[0];
+    try {
+      const { data, error } = await supabase
+        .from('ingestion_runs')
+        .select('*')
+        .order('started_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (!error && data) return data as IngestionRun;
+    } catch {
+      // Ignore
+    }
+    return null;
+  },
+
+  async getPoolCounts(): Promise<{ open_jobs: number; companies: number; stale_jobs: number }> {
+    const all = Array.from(jobStore.values());
+    const open_jobs = all.filter((j) => j.status === 'open').length;
+    const companies = new Set(all.map((j) => j.company.toLowerCase().trim())).size;
+    const stale_jobs = all.filter((j) => j.status === 'closed' || j.status === 'archived' || j.ghost_flag).length;
+    return { open_jobs, companies, stale_jobs };
   },
 
   // ===================== CUSTOM SCAN REQUESTS =====================

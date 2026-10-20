@@ -121,6 +121,11 @@ export default function DashboardPage() {
   const [remoteOnly, setRemoteOnly] = useState(false);
   const [minMatchScore, setMinMatchScore] = useState(60);
 
+  // System Health & Market Stats State
+  const [marketStats, setMarketStats] = useState<any>(null);
+  const [systemHealth, setSystemHealth] = useState<any>(null);
+  const [healthPopoverOpen, setHealthPopoverOpen] = useState(false);
+
   // Actions & feedback state
   const [toast, setToast] = useState<ToastState>({ show: false, message: '', type: 'info' });
   const [skippingJobId, setSkippingJobId] = useState<string | null>(null);
@@ -160,6 +165,22 @@ export default function DashboardPage() {
       }
 
       try {
+        const healthRes = await fetch('/api/system/health');
+        if (healthRes.ok) {
+          const healthJson = await healthRes.json();
+          setSystemHealth(healthJson);
+          if (healthJson?.pool?.total_open !== undefined) {
+            setPoolStats((prev) => ({
+              ...prev,
+              totalOpen: healthJson.pool.total_open,
+            }));
+          }
+        }
+      } catch {
+        // Ignore health fetch failure
+      }
+
+      try {
         const intRes = await fetch('/api/interviews');
         if (intRes.ok) {
           const intJson = await intRes.json();
@@ -184,6 +205,9 @@ export default function DashboardPage() {
       const json = await res.json();
       if (json.jobs) {
         setJobs(json.jobs);
+      }
+      if (json.market_stats !== undefined) {
+        setMarketStats(json.market_stats);
       }
     } catch (err: any) {
       console.error('Job fetch error:', err);
@@ -401,28 +425,30 @@ export default function DashboardPage() {
 
   // Client-side filtering
   const filteredJobs = useMemo(() => {
-    return jobs.filter((job) => {
+    return (jobs || []).filter((job) => {
       // Min match score filter
-      if (job.score < minMatchScore) return false;
+      if ((job.score ?? 0) < minMatchScore) return false;
 
       // Remote only filter
       if (remoteOnly) {
-        const isRemote = job.location.toLowerCase().includes('remote') || job.title.toLowerCase().includes('remote');
+        const loc = job.location || '';
+        const title = job.title || '';
+        const isRemote = loc.toLowerCase().includes('remote') || title.toLowerCase().includes('remote');
         if (!isRemote) return false;
       }
 
       // Role filter
       if (selectedRole !== 'all') {
-        const titleMatch = job.title.toLowerCase().includes(selectedRole.toLowerCase());
+        const titleMatch = (job.title || '').toLowerCase().includes(selectedRole.toLowerCase());
         if (!titleMatch) return false;
       }
 
       // Search Query filter
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
-        const matchesTitle = job.title.toLowerCase().includes(q);
-        const matchesCompany = job.company.toLowerCase().includes(q);
-        const matchesSkills = job.matched_skills.some((s) => s.toLowerCase().includes(q));
+        const matchesTitle = (job.title || '').toLowerCase().includes(q);
+        const matchesCompany = (job.company || '').toLowerCase().includes(q);
+        const matchesSkills = (job.matched_skills || []).some((s) => s.toLowerCase().includes(q));
         if (!matchesTitle && !matchesCompany && !matchesSkills) return false;
       }
 
@@ -432,11 +458,11 @@ export default function DashboardPage() {
 
   // Derived Stats
   const stats = useMemo(() => {
-    const totalMatches = jobs.length;
-    const avgScore = totalMatches > 0 ? Math.round(jobs.reduce((acc, j) => acc + j.score, 0) / totalMatches) : 78;
-    const autoCount = jobs.filter((j) => j.band === 'auto').length;
-    const interviewCount = interviews.length;
-    const firstInterview = interviews[0];
+    const totalMatches = (jobs || []).length;
+    const avgScore = totalMatches > 0 ? Math.round((jobs || []).reduce((acc, j) => acc + (j.score || 0), 0) / totalMatches) : 78;
+    const autoCount = (jobs || []).filter((j) => j.band === 'auto').length;
+    const interviewCount = (interviews || []).length;
+    const firstInterview = (interviews || [])[0];
     const countdown = firstInterview?.countdown_chip || (interviewCount > 0 ? 'Scheduled' : 'None upcoming');
 
     return {
@@ -473,7 +499,7 @@ export default function DashboardPage() {
 
   // Helper for company monogram
   const getMonogram = (name: string) => {
-    const cleaned = name.trim().replace(/[^a-zA-Z0-9 ]/g, '');
+    const cleaned = (name || '').trim().replace(/[^a-zA-Z0-9 ]/g, '');
     const parts = cleaned.split(' ').filter(Boolean);
     if (parts.length >= 2) {
       return (parts[0][0] + parts[1][0]).toUpperCase();
@@ -484,17 +510,26 @@ export default function DashboardPage() {
   // Dynamic role options for select
   const roleOptions = useMemo(() => {
     const set = new Set<string>();
-    if (profile.target_roles && Array.isArray(profile.target_roles)) {
+    if (profile?.target_roles && Array.isArray(profile.target_roles)) {
       profile.target_roles.forEach((r: string) => set.add(r));
     }
-    jobs.forEach((j) => {
+    (jobs || []).forEach((j) => {
       if (j.title) {
         const shortTitle = j.title.split('-')[0].trim();
         set.add(shortTitle);
       }
     });
     return Array.from(set).slice(0, 8);
-  }, [profile.target_roles, jobs]);
+  }, [profile?.target_roles, jobs]);
+
+  // Crash-proof derivations before return
+  const primaryRole = profile?.target_roles?.[0] || profile?.current_title ||
+                      preferences?.target_roles?.[0] || "Your target role";
+  const marketStatsSafe = marketStats ?? null;
+  const medianSalary  = marketStatsSafe?.median_salary ?? null;
+  const trendSeries   = Array.isArray(marketStatsSafe?.trend) ? marketStatsSafe.trend : [];
+  const hotSkills     = Array.isArray(marketStatsSafe?.hot_skills)
+                  ? marketStatsSafe.hot_skills.slice(0, 5) : [];
 
   return (
     <div className="min-h-screen bg-[#F7F8FB] text-[#475569] flex flex-col font-sans">
@@ -814,11 +849,89 @@ export default function DashboardPage() {
             {/* POOL STATUS HERO CARD */}
             <div className="bg-white border border-[#E2E8F0] rounded-2xl p-5 sm:p-6 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
               <div>
-                <div className="flex items-center gap-2">
-                  <h1 className="text-xl sm:text-2xl font-black text-[#0F172A] font-heading tracking-tight">
-                    Good morning, {firstName}
-                  </h1>
-                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
+                <div className="flex flex-wrap items-center gap-3">
+                  <div className="flex items-center gap-2">
+                    <h1 className="text-xl sm:text-2xl font-black text-[#0F172A] font-heading tracking-tight">
+                      Good morning, {firstName}
+                    </h1>
+                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
+                  </div>
+
+                  {/* Header Provenance Badge */}
+                  <div className="relative">
+                    <button
+                      type="button"
+                      onClick={() => setHealthPopoverOpen(!healthPopoverOpen)}
+                      className={`px-2.5 py-1 rounded-full text-[11px] font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                        systemHealth?.mode === 'live'
+                          ? 'bg-emerald-50 text-emerald-800 border border-emerald-300 hover:bg-emerald-100'
+                          : 'bg-amber-50 text-amber-800 border border-amber-300 hover:bg-amber-100'
+                      }`}
+                      title="Click to view data provenance & system health"
+                    >
+                      <span className={`w-2 h-2 rounded-full ${systemHealth?.mode === 'live' ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`} />
+                      <span>{systemHealth?.mode === 'live' ? 'LIVE DATA (TinyFish + Supabase)' : 'DEMO FIXTURES (demo mode)'}</span>
+                    </button>
+
+                    {/* Popover */}
+                    {healthPopoverOpen && (
+                      <div className="absolute left-0 mt-2 w-80 bg-white border border-[#E2E8F0] rounded-2xl shadow-xl p-4 z-50 text-left text-xs space-y-3">
+                        <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+                          <span className="font-bold text-[#0F172A]">System Health & Provenance</span>
+                          <button
+                            type="button"
+                            onClick={() => setHealthPopoverOpen(false)}
+                            className="text-slate-400 hover:text-slate-600 p-0.5 rounded cursor-pointer"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[#475569]">TinyFish key present?</span>
+                            <span className={`font-bold px-1.5 py-0.5 rounded text-[10px] ${systemHealth?.keys?.tinyfish ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-600'}`}>
+                              {systemHealth?.keys?.tinyfish ? 'yes' : 'no'}
+                            </span>
+                          </div>
+                          <div className="flex items-center justify-between">
+                            <span className="text-[#475569]">Supabase key present?</span>
+                            <span className={`font-bold px-1.5 py-0.5 rounded text-[10px] ${systemHealth?.keys?.supabase ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-600'}`}>
+                              {systemHealth?.keys?.supabase ? 'yes' : 'no'}
+                            </span>
+                          </div>
+                          <div className="flex items-center justify-between">
+                            <span className="text-[#475569]">Anthropic key present?</span>
+                            <span className={`font-bold px-1.5 py-0.5 rounded text-[10px] ${systemHealth?.keys?.anthropic ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-600'}`}>
+                              {systemHealth?.keys?.anthropic ? 'yes' : 'no'}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="pt-2 border-t border-slate-100 space-y-1">
+                          <span className="text-[10px] font-bold uppercase text-[#94A3B8] block">Last Ingestion Run</span>
+                          <div className="text-[11px] text-[#0F172A]">
+                            {systemHealth?.last_ingestion ? (
+                              <>
+                                <span className="font-semibold">{systemHealth.last_ingestion.jobs_found} jobs found</span>
+                                <span className="text-slate-400"> via {systemHealth.last_ingestion.method}</span>
+                                <div className="text-[10px] text-slate-500">
+                                  {systemHealth.last_ingestion.timestamp ? new Date(systemHealth.last_ingestion.timestamp).toLocaleString() : 'N/A'}
+                                </div>
+                              </>
+                            ) : (
+                              <span className="text-slate-400">No runs recorded yet</span>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
+                          <span className="text-[#475569]">Live pool count:</span>
+                          <span className="font-black text-[#0F172A]">{systemHealth?.pool?.total_open ?? poolStats.totalOpen} jobs</span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </div>
                 <p className="text-xs sm:text-sm text-[#475569] mt-0.5">
                   Centralized Job Pool: <span className="font-bold text-[#0F172A]">{poolStats.totalOpen.toLocaleString()} open jobs</span> &bull; Last sync {poolStats.lastSync}
@@ -861,40 +974,55 @@ export default function DashboardPage() {
             </div>
 
             {/* MARKET INTELLIGENCE WIDGET */}
-            <div className="bg-white border border-[#E2E8F0] rounded-2xl p-4 sm:p-5 shadow-sm space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <TrendingUp className="w-4 h-4 text-cyan-600" />
-                  <span className="text-xs font-bold text-[#0F172A]">Market Intelligence</span>
+            {marketStatsSafe && (
+              <div className="bg-white border border-[#E2E8F0] rounded-2xl p-4 sm:p-5 shadow-sm space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <TrendingUp className="w-4 h-4 text-cyan-600" />
+                    <span className="text-xs font-bold text-[#0F172A]">Market Intelligence</span>
+                  </div>
+                  <span className="text-[11px] font-medium text-[#94A3B8]">Target Role: {primaryRole}</span>
                 </div>
-                <span className="text-[11px] font-medium text-[#94A3B8]">Target Role: {primaryRole}</span>
-              </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/60">
-                  <span className="text-[10px] font-bold uppercase text-[#94A3B8] block">Median Salary in Pool</span>
-                  <span className="text-sm font-black text-[#0F172A]">₹32.5L / yr</span>
-                </div>
-                <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/60">
-                  <span className="text-[10px] font-bold uppercase text-[#94A3B8] block">8-Week Hiring Trend</span>
-                  <div className="h-4 flex items-end gap-1 pt-0.5">
-                    {[14, 18, 22, 19, 28, 35, 42, 48].map((h, i) => (
-                      <div key={i} className="flex-1 bg-cyan-600 rounded-t-xs" style={{ height: `${(h / 48) * 100}%` }} />
-                    ))}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/60">
+                    <span className="text-[10px] font-bold uppercase text-[#94A3B8] block">Median Salary in Pool</span>
+                    <span className="text-sm font-black text-[#0F172A]">{medianSalary || '₹32.5L / yr'}</span>
                   </div>
-                </div>
-                <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/60">
-                  <span className="text-[10px] font-bold uppercase text-[#94A3B8] block mb-1">Hot Skills</span>
-                  <div className="flex flex-wrap gap-1">
-                    {['TypeScript', 'React', 'Node.js', 'Go', 'Docker'].map((sk) => (
-                      <span key={sk} className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-cyan-50 text-cyan-800 border border-cyan-100">
-                        {sk}
-                      </span>
-                    ))}
+                  <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/60">
+                    <span className="text-[10px] font-bold uppercase text-[#94A3B8] block">8-Week Hiring Trend</span>
+                    <div className="h-4 flex items-end gap-1 pt-0.5">
+                      {trendSeries.length > 0
+                        ? trendSeries.map((h: number, i: number) => {
+                            const maxH = Math.max(...trendSeries, 1);
+                            return (
+                              <div key={i} className="flex-1 bg-cyan-600 rounded-t-xs" style={{ height: `${(h / maxH) * 100}%` }} />
+                            );
+                          })
+                        : [14, 18, 22, 19, 28, 35, 42, 48].map((h: number, i: number) => (
+                            <div key={i} className="flex-1 bg-cyan-600 rounded-t-xs" style={{ height: `${(h / 48) * 100}%` }} />
+                          ))}
+                    </div>
+                  </div>
+                  <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/60">
+                    <span className="text-[10px] font-bold uppercase text-[#94A3B8] block mb-1">Hot Skills</span>
+                    <div className="flex flex-wrap gap-1">
+                      {hotSkills.length > 0
+                        ? hotSkills.map((sk: string) => (
+                            <span key={sk} className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-cyan-50 text-cyan-800 border border-cyan-100">
+                              {sk}
+                            </span>
+                          ))
+                        : ['TypeScript', 'React', 'Node.js', 'Go', 'Docker'].map((sk) => (
+                            <span key={sk} className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-cyan-50 text-cyan-800 border border-cyan-100">
+                              {sk}
+                            </span>
+                          ))}
+                    </div>
                   </div>
                 </div>
               </div>
-            </div>
+            )}
 
             {/* STATS STRIP (Four white cards with soft-tinted icon chips) */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -1152,20 +1280,20 @@ export default function DashboardPage() {
               ) : (
                 /* Job Cards List */
                 <div className="space-y-4">
-                  {filteredJobs.map((job) => {
-                    const isAuto = job.score >= 80;
-                    const isGap = job.score >= 60 && job.score < 80;
-                    const isStretch = job.score < 60;
+                  {(filteredJobs || []).map((job) => {
+                    const isAuto = (job.score ?? 0) >= 80;
+                    const isGap = (job.score ?? 0) >= 60 && (job.score ?? 0) < 80;
+                    const isStretch = (job.score ?? 0) < 60;
                     const isSkipping = skippingJobId === job.id;
                     const isTailoring = tailoringJobId === job.id;
-                    const isAutopilot = preferences.mode === 'autopilot';
+                    const isAutopilot = preferences?.mode === 'autopilot';
                     const isCooldown = Boolean(
                       job.is_blocked || (job.reapply_after && new Date(job.reapply_after).getTime() > Date.now())
                     );
 
-                    const matchedSkillsDisplay = job.matched_skills.slice(0, 4);
-                    const extraMatchedCount = Math.max(0, job.matched_skills.length - 4);
-                    const missingSkillsDisplay = job.missing_skills.slice(0, 3);
+                    const matchedSkillsDisplay = (job.matched_skills || []).slice(0, 4);
+                    const extraMatchedCount = Math.max(0, (job.matched_skills || []).length - 4);
+                    const missingSkillsDisplay = (job.missing_skills || []).slice(0, 3);
                     const firstReason = job.reasons && job.reasons.length > 0 ? job.reasons[0] : null;
 
                     return (
@@ -1188,6 +1316,17 @@ export default function DashboardPage() {
                                 <h3 className="text-base font-bold text-[#0F172A] font-heading leading-tight">
                                   {job.title}
                                 </h3>
+
+                                {/* Provenance Tag: src: tinyfish or src: fixture */}
+                                <span
+                                  className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                    job.ingestion_method === 'tinyfish'
+                                      ? 'bg-slate-100 text-slate-700 border border-slate-200'
+                                      : 'bg-amber-50 text-amber-700 border border-amber-200'
+                                  }`}
+                                >
+                                  src: {job.ingestion_method || 'fixture'}
+                                </span>
 
                                 {/* Small grey tag if ghost_flag */}
                                 {job.ghost_flag && (
@@ -1254,7 +1393,7 @@ export default function DashboardPage() {
                         <div className="space-y-2 pt-2 border-t border-slate-100">
                           <div className="flex flex-wrap items-center gap-1.5">
                             {/* Matched skills chips (up to 4 green + n more) */}
-                            {matchedSkillsDisplay.map((skill) => (
+                            {(matchedSkillsDisplay || []).map((skill) => (
                               <span
                                 key={skill}
                                 className="px-2.5 py-0.5 rounded-md bg-emerald-50 border border-emerald-200 text-emerald-800 text-[11px] font-medium flex items-center gap-1"
@@ -1271,7 +1410,7 @@ export default function DashboardPage() {
                             )}
 
                             {/* Missing skills chips (up to 3 amber) */}
-                            {missingSkillsDisplay.map((skill) => (
+                            {(missingSkillsDisplay || []).map((skill) => (
                               <span
                                 key={skill}
                                 className="px-2.5 py-0.5 rounded-md bg-amber-50 border border-amber-200 text-amber-800 text-[11px] font-medium"
@@ -1545,12 +1684,12 @@ export default function DashboardPage() {
                   </span>
                 </div>
                 <div className="space-y-2 text-[11px] text-[#475569]">
-                  <p><strong className="text-[#0F172A]">Target Role:</strong> {tailoredModal.job.title}</p>
-                  <p><strong className="text-[#0F172A]">Target Company:</strong> {tailoredModal.job.company}</p>
+                  <p><strong className="text-[#0F172A]">Target Role:</strong> {tailoredModal.job?.title}</p>
+                  <p><strong className="text-[#0F172A]">Target Company:</strong> {tailoredModal.job?.company}</p>
                   <div>
                     <strong className="text-[#0F172A] block mb-1">ATS Matched Skills:</strong>
                     <div className="flex flex-wrap gap-1">
-                      {tailoredModal.job.matched_skills.map((s) => (
+                      {(tailoredModal.job?.matched_skills || []).map((s) => (
                         <span key={s} className="px-2 py-0.5 rounded bg-emerald-50 border border-emerald-300 text-emerald-800 text-[10px] font-bold">
                           ✓ {s}
                         </span>
@@ -1587,7 +1726,7 @@ export default function DashboardPage() {
                 TailorAgent Change Log ({tailoredModal.changeLog.length} sections modified)
               </span>
               <div className="space-y-2">
-                {tailoredModal.changeLog.map((log, i) => (
+                {(tailoredModal.changeLog || []).map((log, i) => (
                   <div key={i} className="p-3 rounded-xl bg-[#F8FAFC] border border-[#E2E8F0] space-y-1.5 text-xs">
                     <div className="flex items-center justify-between">
                       <span className="font-bold text-cyan-800 bg-[#ECFEFF] px-2 py-0.5 rounded-md border border-cyan-200 text-[10px]">
@@ -1737,11 +1876,11 @@ export default function DashboardPage() {
             </div>
 
             <p className="text-xs text-[#475569]">
-              This role for <strong className="text-[#0F172A]">{gapPlanModal.job.title}</strong> is currently a stretch role ({gapPlanModal.job.score}%). Here are recommended action steps:
+              This role for <strong className="text-[#0F172A]">{gapPlanModal.job?.title || 'this role'}</strong> is currently a stretch role ({gapPlanModal.job?.score || 0}%). Here are recommended action steps:
             </p>
 
             <div className="space-y-2 text-xs">
-              {gapPlanModal.job.missing_skills.map((skill, idx) => (
+              {(gapPlanModal.job?.missing_skills || []).map((skill, idx) => (
                 <div key={skill} className="p-2.5 rounded-xl bg-amber-50 border border-amber-200 flex items-center justify-between text-amber-900">
                   <span className="font-bold">{idx + 1}. Acquire {skill}</span>
                   <span className="text-[10px] bg-white px-2 py-0.5 rounded-md border border-amber-200 font-semibold">Priority High</span>

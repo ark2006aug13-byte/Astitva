@@ -91,7 +91,7 @@ export async function extractRawTextFromBuffer(
   } else if (lower.includes('.pdf') || lower.includes('pdf')) {
     try {
       const { PDFParse } = await import('pdf-parse');
-      const parser = new (PDFParse as any)(new Uint8Array(buffer));
+      const parser = new (PDFParse as any)({ data: new Uint8Array(buffer) });
       await parser.load();
       const res = await parser.getText();
       extractedText = (res && res.text ? res.text : '') || '';

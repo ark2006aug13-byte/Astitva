@@ -39,6 +39,7 @@ export interface JoinedJobMatch {
   ghost_flag: boolean;
   reapply_after?: string | null;
   is_blocked?: boolean;
+  ingestion_method?: 'tinyfish' | 'fixture' | 'unknown';
 }
 
 // Global in-memory fallback stores
@@ -194,8 +195,9 @@ export async function runScoutAndMatchPipeline(
   let allSources: string[] = [];
   let lastTimestamp = new Date().toISOString();
 
+  const targetCount = options.skipRateLimit ? 14 : 40;
   for (const query of queries) {
-    if (rawDiscoveredJobs.length >= 40) break;
+    if (rawDiscoveredJobs.length >= targetCount) break;
     const batch = await searchJobsWithTinyFish(query, {
       targetRole: targetRoles[0],
       skills: resumeSkills,

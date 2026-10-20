@@ -102,7 +102,7 @@ export async function GET(
             fullName: profile.full_name || 'Aryan Raj',
             targetRoles: profile.target_roles || ['Staff Systems Engineer'],
             resumeSkills: profile.resume_skills || ['TypeScript', 'React', 'Node.js', 'PostgreSQL'],
-            summary: profile.summary || 'Staff Systems Engineer',
+            summary: (profile as any).summary || 'Staff Systems Engineer',
             autoApplyThreshold: 80,
           }
         );
@@ -186,6 +186,7 @@ export async function GET(
         ...job,
         posted_age: postedAge,
         freshness_badge: freshnessBadge,
+        ingestion_method: job.ingestion_method || 'unknown',
       },
       company_profile: companyProfile,
       match: matchData,
