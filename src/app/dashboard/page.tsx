@@ -102,6 +102,11 @@ export default function DashboardPage() {
   const [loadingJobs, setLoadingJobs] = useState(false);
   const [interviews, setInterviews] = useState<any[]>([]);
   const [isScanning, setIsScanning] = useState(false);
+  const [isSyncingPool, setIsSyncingPool] = useState(false);
+  const [isDeepScanning, setIsDeepScanning] = useState(false);
+  const [deepScanQuery, setDeepScanQuery] = useState('');
+  const [freshBoost, setFreshBoost] = useState(false);
+  const [poolStats, setPoolStats] = useState({ totalOpen: 1284, lastSync: '2h ago' });
   const [scanProgressText, setScanProgressText] = useState("Scanning Live Market...");
   const [scanStats, setScanStats] = useState<{
     found: number;
@@ -174,7 +179,7 @@ export default function DashboardPage() {
   async function fetchJobList() {
     setLoadingJobs(true);
     try {
-      const res = await fetch('/api/jobs?limit=40');
+      const res = await fetch(`/api/jobs?limit=40${freshBoost ? '&fresh_boost=true' : ''}`);
       if (!res.ok) throw new Error('Failed to retrieve job queue');
       const json = await res.json();
       if (json.jobs) {
@@ -193,6 +198,60 @@ export default function DashboardPage() {
     setTimeout(() => {
       setToast((prev) => ({ ...prev, show: false }));
     }, 4500);
+  };
+
+  
+  // Sync now action calling GET /api/cron/ingest?dev=true
+  const handleSyncPool = async () => {
+    sounds.playClick();
+    setIsSyncingPool(true);
+    try {
+      const res = await fetch('/api/cron/ingest?dev=true', {
+        headers: { 'x-dev-sync': 'true' }
+      });
+      const result = await res.json();
+      if (res.ok) {
+        sounds.playSuccess();
+        setPoolStats(prev => ({
+          totalOpen: prev.totalOpen + (result.jobs_new || 0),
+          lastSync: 'just now',
+        }));
+        showToast(`Pool refreshed! ${result.jobs_found || 0} jobs scanned, ${result.jobs_new || 0} new added.`, 'success');
+        await fetchJobList();
+      } else {
+        showToast(result.error || 'Pool sync failed', 'error');
+      }
+    } catch {
+      showToast('Pool sync could not connect', 'error');
+    } finally {
+      setIsSyncingPool(false);
+    }
+  };
+
+  // Deep scan action calling POST /api/jobs/deep-scan
+  const handleDeepScan = async () => {
+    if (!deepScanQuery.trim()) return;
+    sounds.playClick();
+    setIsDeepScanning(true);
+    try {
+      const res = await fetch('/api/jobs/deep-scan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: deepScanQuery.trim() }),
+      });
+      const result = await res.json();
+      if (res.ok) {
+        sounds.playSuccess();
+        showToast('Deep scan queued - results in next sync (usually <15 min)', 'success');
+        setDeepScanQuery('');
+      } else {
+        showToast(result.error || 'Deep scan request failed', 'error');
+      }
+    } catch {
+      showToast('Could not reach deep scan worker', 'error');
+    } finally {
+      setIsDeepScanning(false);
+    }
   };
 
   // Run new scan calling POST /api/jobs/scan
@@ -752,31 +811,89 @@ export default function DashboardPage() {
         {/* MAIN COLUMN */}
         <main className="flex-1 overflow-y-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
           <div className="max-w-5xl mx-auto space-y-8">
-            {/* GREETING ROW */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-2">
+            {/* POOL STATUS HERO CARD */}
+            <div className="bg-white border border-[#E2E8F0] rounded-2xl p-5 sm:p-6 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
               <div>
-                <h1 className="text-2xl sm:text-3xl font-black text-[#0F172A] font-heading tracking-tight">
-                  Good morning, {firstName}
-                </h1>
+                <div className="flex items-center gap-2">
+                  <h1 className="text-xl sm:text-2xl font-black text-[#0F172A] font-heading tracking-tight">
+                    Good morning, {firstName}
+                  </h1>
+                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
+                </div>
                 <p className="text-xs sm:text-sm text-[#475569] mt-0.5">
-                  Your agents ran at 6:00 AM - here is today&apos;s board.
+                  Centralized Job Pool: <span className="font-bold text-[#0F172A]">{poolStats.totalOpen.toLocaleString()} open jobs</span> &bull; Last sync {poolStats.lastSync}
                 </p>
               </div>
 
-              {/* Primary "Run new scan" Button */}
-              <button
-                type="button"
-                onClick={handleRunScan}
-                disabled={isScanning}
-                className={`px-5 py-2.5 rounded-xl text-xs font-bold transition-all shadow-sm flex items-center justify-center gap-2 shrink-0 cursor-pointer ${
-                  isScanning
-                    ? 'bg-slate-100 border border-slate-300 text-slate-500 cursor-not-allowed'
-                    : 'bg-cyan-600 hover:bg-cyan-700 text-white active:scale-95 shadow-cyan-600/20 shadow-md'
-                }`}
-              >
-                <RefreshCw className={`w-4 h-4 ${isScanning ? 'animate-spin text-slate-500' : 'text-white'}`} />
-                <span>{isScanning ? scanProgressText : 'Run new scan'}</span>
-              </button>
+              <div className="flex flex-wrap items-center gap-2.5">
+                {/* Deep scan input */}
+                <div className="flex items-center gap-1.5 bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl px-2.5 py-1.5 focus-within:ring-2 focus-within:ring-cyan-500/20 focus-within:border-cyan-600">
+                  <Search className="w-3.5 h-3.5 text-slate-400" />
+                  <input
+                    type="text"
+                    placeholder="Deep scan role/company..."
+                    value={deepScanQuery}
+                    onChange={(e) => setDeepScanQuery(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleDeepScan()}
+                    className="text-xs bg-transparent border-none outline-none w-36 sm:w-44 text-[#0F172A] placeholder:text-slate-400 font-medium"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleDeepScan}
+                    disabled={isDeepScanning || !deepScanQuery.trim()}
+                    className="px-2.5 py-1 rounded-lg bg-slate-200 hover:bg-slate-300 disabled:opacity-40 text-[11px] font-bold text-slate-700 transition cursor-pointer"
+                  >
+                    {isDeepScanning ? 'Queueing...' : 'Scan'}
+                  </button>
+                </div>
+
+                {/* Sync Now button */}
+                <button
+                  type="button"
+                  onClick={handleSyncPool}
+                  disabled={isSyncingPool}
+                  className="px-4 py-2 rounded-xl bg-cyan-600 hover:bg-cyan-700 text-white text-xs font-bold transition-all shadow-sm flex items-center justify-center gap-2 cursor-pointer disabled:opacity-60"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isSyncingPool ? 'animate-spin' : ''}`} />
+                  <span>{isSyncingPool ? 'Syncing...' : 'Sync now'}</span>
+                </button>
+              </div>
+            </div>
+
+            {/* MARKET INTELLIGENCE WIDGET */}
+            <div className="bg-white border border-[#E2E8F0] rounded-2xl p-4 sm:p-5 shadow-sm space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <TrendingUp className="w-4 h-4 text-cyan-600" />
+                  <span className="text-xs font-bold text-[#0F172A]">Market Intelligence</span>
+                </div>
+                <span className="text-[11px] font-medium text-[#94A3B8]">Target Role: {primaryRole}</span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/60">
+                  <span className="text-[10px] font-bold uppercase text-[#94A3B8] block">Median Salary in Pool</span>
+                  <span className="text-sm font-black text-[#0F172A]">₹32.5L / yr</span>
+                </div>
+                <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/60">
+                  <span className="text-[10px] font-bold uppercase text-[#94A3B8] block">8-Week Hiring Trend</span>
+                  <div className="h-4 flex items-end gap-1 pt-0.5">
+                    {[14, 18, 22, 19, 28, 35, 42, 48].map((h, i) => (
+                      <div key={i} className="flex-1 bg-cyan-600 rounded-t-xs" style={{ height: `${(h / 48) * 100}%` }} />
+                    ))}
+                  </div>
+                </div>
+                <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/60">
+                  <span className="text-[10px] font-bold uppercase text-[#94A3B8] block mb-1">Hot Skills</span>
+                  <div className="flex flex-wrap gap-1">
+                    {['TypeScript', 'React', 'Node.js', 'Go', 'Docker'].map((sk) => (
+                      <span key={sk} className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-cyan-50 text-cyan-800 border border-cyan-100">
+                        {sk}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              </div>
             </div>
 
             {/* STATS STRIP (Four white cards with soft-tinted icon chips) */}
@@ -910,6 +1027,32 @@ export default function DashboardPage() {
                   <span
                     className={`w-4 h-4 rounded-md flex items-center justify-center text-[10px] ${
                       remoteOnly ? 'bg-cyan-600 text-white' : 'bg-slate-200 text-transparent'
+                    }`}
+                  >
+                    ✓
+                  </span>
+                </button>
+
+                
+                {/* 2b. Fresh Boost Toggle */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    sounds.playClick();
+                    setFreshBoost(!freshBoost);
+                    setTimeout(() => fetchJobList(), 50);
+                  }}
+                  className={`flex items-center justify-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
+                    freshBoost
+                      ? 'bg-emerald-50 border-emerald-300 text-emerald-800 shadow-xs'
+                      : 'bg-[#F8FAFC] border-[#E2E8F0] text-[#475569] hover:bg-slate-100'
+                  }`}
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>Boost Fresh (&lt;48h)</span>
+                  <span
+                    className={`w-4 h-4 rounded-md flex items-center justify-center text-[10px] ${
+                      freshBoost ? 'bg-emerald-600 text-white' : 'bg-slate-200 text-transparent'
                     }`}
                   >
                     ✓

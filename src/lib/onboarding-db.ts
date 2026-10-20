@@ -71,6 +71,13 @@ const memoryScreening = new Map<string, ScreeningAnswersRecord>();
 const memoryIntegrations = new Map<string, IntegrationRecord[]>();
 
 export const onboardingDb = {
+  async listUserIds(): Promise<string[]> {
+    const ids = new Set<string>();
+    for (const id of memoryProfiles.keys()) ids.add(id);
+    for (const id of memoryPreferences.keys()) ids.add(id);
+    return Array.from(ids);
+  },
+
   async getProfile(userId: string): Promise<ProfileRecord | null> {
     try {
       const { data, error } = await supabase

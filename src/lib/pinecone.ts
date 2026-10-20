@@ -43,10 +43,17 @@ export function cosineSimilarity(vecA: number[], vecB: number[]): number {
   return Math.max(0, Math.min(1, dotProduct / denominator));
 }
 
+// Fast memory cache for text embeddings
+const embeddingCache = new Map<string, number[]>();
+
 /**
  * Generates an embedding vector using Pinecone Inference API or resilient term-frequency vector
  */
 export async function getEmbedding(text: string): Promise<number[]> {
+  const cacheKey = text.length > 300 ? text.slice(0, 300) : text;
+  const cached = embeddingCache.get(cacheKey);
+  if (cached) return cached;
+
   const pc = getPineconeClient();
 
   if (pc) {
@@ -59,7 +66,9 @@ export async function getEmbedding(text: string): Promise<number[]> {
       });
 
       if (embeddings && embeddings.data && embeddings.data[0] && Array.isArray((embeddings.data[0] as any).values)) {
-        return (embeddings.data[0] as any).values;
+        const vec = (embeddings.data[0] as any).values;
+        embeddingCache.set(cacheKey, vec);
+        return vec;
       }
     } catch (err) {
       console.warn('Pinecone inference embedding failed, using resilient vector model:', err);
@@ -67,7 +76,9 @@ export async function getEmbedding(text: string): Promise<number[]> {
   }
 
   // High-dimensional semantic token frequency embedding (128-dim hash vector)
-  return generateTermVector(text);
+  const vec = generateTermVector(text);
+  embeddingCache.set(cacheKey, vec);
+  return vec;
 }
 
 /**
